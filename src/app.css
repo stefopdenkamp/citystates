@@ -1,0 +1,282 @@
+/* Fonts are served from static/fonts, so they also work without an internet connection. */
+@font-face {
+	font-family: 'Cinzel Decorative';
+	font-weight: 400;
+	font-style: normal;
+	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Regular.ttf') format('truetype');
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Cinzel Decorative';
+	font-weight: 700;
+	font-style: normal;
+	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Bold.ttf') format('truetype');
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Cinzel Decorative';
+	font-weight: 900;
+	font-style: normal;
+	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Black.ttf') format('truetype');
+	font-display: swap;
+}
+
+/* Source Serif 4 variable fonts cover every weight from 200 to 900 */
+@font-face {
+	font-family: 'Source Serif 4';
+	font-weight: 200 900;
+	font-style: normal;
+	src: url('/games/citystates/fonts/source-serif-4/SourceSerif4-Variable.ttf') format('truetype');
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Source Serif 4';
+	font-weight: 200 900;
+	font-style: italic;
+	src: url('/games/citystates/fonts/source-serif-4/SourceSerif4-Italic-Variable.ttf') format('truetype');
+	font-display: swap;
+}
+
+:root {
+	--color-grayscale-1: hsl(220, 15%, 8%);
+	--color-grayscale-2: hsl(220, 15%, 13%);
+	--color-grayscale-3: hsl(220, 12%, 22%);
+	--color-grayscale-4: hsl(220, 10%, 45%);
+	--color-grayscale-5: hsl(220, 10%, 85%);
+	--color-grayscale-6: hsl(40, 30%, 94%);
+
+	--color-accent: hsl(15, 74%, 55%);
+	--color-accent-dark: hsl(15, 74%, 42%);
+	--color-danger: hsl(0, 75%, 60%);
+	--color-success: hsl(130, 50%, 50%);
+	--color-valid-cell: hsla(50, 100%, 70%, 0.6);
+	--color-backdrop: hsla(220, 15%, 5%, 0.7);
+
+	/* semi-transparent so the board image shows through, softened */
+	--color-board-cell: hsla(100, 35%, 85%, 0.35);
+	--color-board-line: hsla(0, 0%, 85%, 0.7);
+	--board-cell-size: 48px;
+
+	--color-player-white: hsl(0, 0%, 95%);
+	--color-player-yellow: hsl(50, 90%, 50%);
+	--color-player-orange: hsl(28, 90%, 50%);
+	--color-player-red: hsl(0, 70%, 50%);
+	--color-player-pink: hsl(313, 60%, 55%);
+	--color-player-purple: hsl(275, 55%, 50%);
+	--color-player-blue: hsl(215, 70%, 40%);
+	--color-player-azzurro: hsl(215, 70%, 70%);
+	--color-player-cyan: hsl(185, 70%, 50%);
+	--color-player-lightGreen: hsl(130, 70%, 70%);
+	--color-player-green: hsl(130, 70%, 30%);
+	--color-player-gray: hsl(0, 0%, 65%);
+
+	--color-materials: hsl(25, 35%, 55%);
+	--color-gold: hsl(45, 85%, 55%);
+	--color-faith: hsl(275, 60%, 70%);
+	--color-culture: hsl(320, 50%, 65%);
+	--color-knowledge: hsl(200, 45%, 50%);
+	--color-power: hsl(0, 55%, 55%);
+	--color-people: hsl(100, 30%, 60%);
+
+	/* weight size/line-height family */
+	--font-tiny: 400 0.7rem/1.4 'Source Serif 4', serif;
+	--font-small: 400 0.85rem/1.5 'Source Serif 4', serif;
+	--font-normal: 400 1rem/1.6 'Source Serif 4', serif;
+	--font-h1: 700 4rem/1.2 'Cinzel Decorative', serif;
+	--font-h2: 400 2rem/1.2 'Cinzel Decorative', serif;
+	--font-heading: 700 1.4rem/1.3 'Source Serif 4', serif;
+	--font-button: 400 0.85rem/1.5 'Cinzel Decorative', serif;
+	--font-button-large: 500 1.3rem/1.4 'Cinzel Decorative', serif;
+
+	--border-radius: 0.4rem;
+	--transition-speed: 0.25s;
+	--phase-title-speed: 2.9s;
+}
+
+[data-color='white'] {
+	--player-color: var(--color-player-white);
+}
+
+[data-color='yellow'] {
+	--player-color: var(--color-player-yellow);
+}
+
+[data-color='orange'] {
+	--player-color: var(--color-player-orange);
+}
+
+[data-color='red'] {
+	--player-color: var(--color-player-red);
+}
+
+[data-color='pink'] {
+	--player-color: var(--color-player-pink);
+}
+
+[data-color='purple'] {
+	--player-color: var(--color-player-purple);
+}
+
+[data-color='blue'] {
+	--player-color: var(--color-player-blue);
+}
+
+[data-color='azzurro'] {
+	--player-color: var(--color-player-azzurro);
+}
+
+[data-color='cyan'] {
+	--player-color: var(--color-player-cyan);
+}
+
+[data-color='lightGreen'] {
+	--player-color: var(--color-player-lightGreen);
+}
+
+[data-color='green'] {
+	--player-color: var(--color-player-green);
+}
+
+[data-color='gray'] {
+	--player-color: var(--color-player-gray);
+}
+
+[data-resource='people'] {
+	--resource-color: var(--color-people);
+}
+
+[data-resource='materials'] {
+	--resource-color: var(--color-materials);
+}
+
+[data-resource='gold'] {
+	--resource-color: var(--color-gold);
+}
+
+[data-resource='faith'] {
+	--resource-color: var(--color-faith);
+}
+
+[data-resource='culture'] {
+	--resource-color: var(--color-culture);
+}
+
+[data-resource='knowledge'] {
+	--resource-color: var(--color-knowledge);
+}
+
+[data-resource='power'] {
+	--resource-color: var(--color-power);
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+
+	background-color: var(--color-grayscale-1);
+	color: var(--color-grayscale-6);
+	font: var(--font-normal);
+}
+
+button,
+input,
+select {
+	padding: 0.4rem 0.8rem;
+
+	background-color: var(--color-grayscale-3);
+	color: var(--color-grayscale-6);
+	border: 1px solid var(--color-grayscale-4);
+	border-radius: var(--border-radius);
+	font: var(--font-small);
+
+	transition: background-color var(--transition-speed), opacity var(--transition-speed);
+}
+
+button {
+	font: var(--font-button);
+
+	cursor: pointer;
+}
+
+/* large button, e.g. 'Create new game'; all other buttons are small */
+button.large {
+	padding: 0.7rem 1.8rem;
+
+	font: var(--font-button-large);
+	border: solid 1px var(--color-accent-dark)
+}
+
+button:hover:not(:disabled) {
+	background-color: var(--color-grayscale-4);
+}
+
+button:disabled {
+	opacity: 0.4;
+
+	cursor: not-allowed;
+}
+
+/* the square shown while dragging a building onto the board (made in ActionSelector) */
+.drag-preview {
+	position: fixed;
+	top: -100px;
+	left: -100px;
+	width: 48px;
+	height: 48px;
+
+	background-color: var(--resource-color);
+	border: 3px solid var(--player-color);
+	border-radius: var(--border-radius);
+}
+
+input[type='checkbox'] {
+	accent-color: var(--color-accent);
+	cursor: pointer;
+}
+
+input[type='checkbox']:disabled {
+	cursor: not-allowed;
+}
+
+button.primary {
+	background-color: var(--color-accent-dark);
+	border-color: var(--color-grayscale-5);
+}
+
+button.primary:hover:not(:disabled) {
+	background-color: var(--color-accent);
+	border-color: var(--color-grayscale-1);
+	color: var(--color-grayscale-1);
+}
+
+dialog {
+	padding: 1.5rem;
+
+	background-color: var(--color-grayscale-2);
+	color: var(--color-grayscale-6);
+	border: 1px solid var(--color-grayscale-4);
+	border-radius: var(--border-radius);
+}
+
+dialog::backdrop {
+	background-color: var(--color-backdrop);
+}
+
+h1,
+h2,
+h3 {
+	margin: 0;
+}
+
+.error {
+	color: var(--color-danger);
+	font: var(--font-small);
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<!-- grayscale-1 background, an accent hexagon with thick walls, flat side up -->
+	<rect width="64" height="64" fill="hsl(220, 15%, 8%)" />
+	<polygon
+		points="53.5,32 42.75,50.62 21.25,50.62 10.5,32 21.25,13.38 42.75,13.38"
+		fill="none"
+		stroke="hsl(15, 74%, 55%)"
+		stroke-width="9"
+		stroke-linejoin="round"
+	/>
+</svg>
