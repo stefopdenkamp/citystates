@@ -45,6 +45,6 @@ This is a boardgame idea digitalized. Inspired by Sid Meiers Civilization, but n
 ## How to play
 
 - Create a game
-- You don't need to change any setting is the start up dialog
+- Name the game, you can ignore the other settings in the dialog
 - Wait for others to join
 - Press 'Ready' and 'Start game'
