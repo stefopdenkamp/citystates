@@ -9,7 +9,8 @@
 	let minPlayerCount = $state(2);
 	let maxPlayerCount = $state(6);
 	let turnTimer = $state<number | null>(null);
-	let chosenObjectives = $state<(number | 'random')[]>(['random', 'random', 'random']);
+	// the third objective can be left out, which is the default: a game of 2 objectives
+	let chosenObjectives = $state<(number | 'random' | 'none')[]>(['random', 'random', 'none']);
 	let enabledCharacteristics = $state<Record<Characteristic, boolean>>({
 		title: false,
 		personalityTrait: false,
@@ -19,6 +20,7 @@
 	let isReligiousDominanceEnabled = $state(false);
 	let isBuildingLimitEnabled = $state(false);
 	let isTestMode = $state(false);
+	let isTutorialEnabled = $state(false);
 	let hasPassword = $state(false);
 	let password = $state('');
 
@@ -31,7 +33,7 @@
 	// An objective is unavailable when another dropdown already picked it.
 	const isTaken = (index: number, slot: number) => chosenObjectives.some((o, i) => i !== slot && o === index);
 
-	// Only test mode plays alone: it forces 1 player, and turning it off goes back to the defaults.
+	// Test mode forces 1 player, and turning it off goes back to the defaults.
 	const onTestModeChange = () => {
 		minPlayerCount = isTestMode ? 1 : 2;
 		maxPlayerCount = isTestMode ? 1 : 6;
@@ -52,6 +54,7 @@
 			isReligiousDominanceEnabled,
 			isBuildingLimitEnabled,
 			isTestMode,
+			isTutorialEnabled,
 			password: hasPassword && password ? password : null
 		});
 		dialog.close();
@@ -70,7 +73,7 @@
 		<div class="row">
 			<label>
 				Min players
-				<input type="number" bind:value={minPlayerCount} min="2" max={maxPlayerCount} disabled={isTestMode} />
+				<input type="number" bind:value={minPlayerCount} min="1" max={maxPlayerCount} disabled={isTestMode} />
 			</label>
 			<label>
 				Max players
@@ -87,6 +90,7 @@
 			<legend>Objectives</legend>
 			{#each chosenObjectives as _, slot (slot)}
 				<select bind:value={chosenObjectives[slot]}>
+					{#if slot === 2}<option value="none">None</option>{/if}
 					<option value="random">Random</option>
 					{#each objectives as objective, index (index)}
 						<option value={index} disabled={isTaken(index, slot)}>{objective.name}: {objective.description}</option>
@@ -123,6 +127,11 @@
 			<label class="toggle">
 				<input type="checkbox" bind:checked={isTestMode} onchange={onTestModeChange} />
 				Test mode
+			</label>
+
+			<label class="toggle">
+				<input type="checkbox" bind:checked={isTutorialEnabled} />
+				Tutorial
 			</label>
 		</fieldset>
 

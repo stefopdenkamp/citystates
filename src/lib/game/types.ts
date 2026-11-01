@@ -76,6 +76,7 @@ export type GameState = {
 	isReligiousDominanceEnabled?: boolean; // an extra objective (missing in older games)
 	isBuildingLimitEnabled?: boolean; // at most 1 building of each type, farms and estates excepted (missing in older games)
 	isTestMode?: boolean; // buildings, units, technologies and policies cost nothing (missing in older games)
+	isTutorialEnabled?: boolean; // every player is shown the tutorial when the game starts (missing in older games)
 	winnerIds?: string[]; // set when the game is finished, more than one is a draw
 	gameStatus: GameStatus;
 	phase: Phase;
@@ -117,12 +118,13 @@ export type GameSettings = {
 	minPlayerCount: number;
 	maxPlayerCount: number;
 	turnTimer: number | null;
-	objectives: (number | 'random')[];
+	objectives: (number | 'random' | 'none')[]; // 'none' leaves the slot out
 	enabledCharacteristics: Record<Characteristic, boolean>;
 	isCityCentreEnabled: boolean;
 	isReligiousDominanceEnabled: boolean;
 	isBuildingLimitEnabled: boolean;
 	isTestMode: boolean;
+	isTutorialEnabled: boolean;
 	password: string | null;
 };
 

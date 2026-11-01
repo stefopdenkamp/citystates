@@ -16,6 +16,7 @@
 	import Sidebar from './Sidebar.svelte';
 	import StatisticsDialog from './StatisticsDialog.svelte';
 	import TechnologiesDialog from './TechnologiesDialog.svelte';
+	import Tutorial from './Tutorial.svelte';
 	import { alertPopup, confirmPopup } from '#lib/client/popup.svelte.ts';
 
 	let {
@@ -113,6 +114,25 @@
 		send({ type: 'turn:end' });
 	};
 
+	// The tutorial is shown to each player once per game; this browser remembers that it was finished or cancelled.
+	const tutorialKey = `citystates-tutorial-${game.id}`;
+	const isTutorialSeen = () => {
+		try {
+			return localStorage.getItem(tutorialKey) === 'seen';
+		} catch {
+			return false;
+		}
+	};
+	let isTutorialOpen = $state(!!game.isTutorialEnabled && !!playerId && !isTutorialSeen());
+	const closeTutorial = () => {
+		isTutorialOpen = false;
+		try {
+			localStorage.setItem(tutorialKey, 'seen');
+		} catch {
+			// it shows again next time
+		}
+	};
+
 	const confirmBuy = (talents: Talent[]) => {
 		pendingBuy?.buy(talents);
 		pendingBuy = null;
@@ -123,7 +143,7 @@
 
 <div class="screen">
 	<header>
-		<div class="objectives">
+		<div class="objectives" data-tutorial="objectives">
 			{#each game.objectives as objective (objective)}
 				<div class="objective" title={objectiveOverview(game, objective)}>
 					<!-- a bar per player, filling from the bottom with their progress, behind the text -->
@@ -145,7 +165,7 @@
 		{/if}
 	</header>
 
-	<div class="board-area">
+	<div class="board-area" data-tutorial="board">
 		<Board
 			{game}
 			{playerId}
@@ -207,6 +227,10 @@
 			{#key phaseTitle.key}
 				<h2 class="phase-title">{phaseTitle.text}</h2>
 			{/key}
+		{/if}
+
+		{#if isTutorialOpen && game.gameStatus === 'inProgress'}
+			<Tutorial onClose={closeTutorial} />
 		{/if}
 
 		{#if game.phase === 'born' && game.lastBorn}

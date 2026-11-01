@@ -14,6 +14,7 @@ const settings: GameSettings = {
 	isReligiousDominanceEnabled: false,
 	isBuildingLimitEnabled: false,
 	isTestMode: false,
+	isTutorialEnabled: false,
 	password: null
 };
 
@@ -44,6 +45,13 @@ describe('creating a game', () => {
 		const state = game.createGameState({ ...settings, objectives: [2, 'random', 'random'] }, 'g', null);
 		expect(state.objectives[0]).toBe(2);
 		expect(new Set(state.objectives).size).toBe(3);
+	});
+
+	test('an objective set to none is left out', () => {
+		const state = game.createGameState({ ...settings, objectives: ['random', 3, 'none'] }, 'g', null);
+		expect(state.objectives).toHaveLength(2);
+		expect(state.objectives[1]).toBe(3);
+		expect(() => game.createGameState({ ...settings, objectives: ['none', 'none', 'none'] }, 'g', null)).toThrow();
 	});
 
 	test('duplicate objectives are refused', () => {
@@ -180,7 +188,7 @@ describe('paying with talents', () => {
 		const state = startedGame(1);
 		game.finishBorn(state, 0);
 		const player = state.players[0];
-		player.people = 2;
+		player.people = 1;
 		player.talents = ['artist', 'scientist'];
 		player.resources.materials = 3;
 		state.buildings.push({ id: 'b', type: 'blacksmith', ownerId: player.id, x: player.center.x + 1, y: player.center.y });
@@ -787,14 +795,27 @@ describe('technologies', () => {
 		expect(() => game.buyUnit(state, a.id, 'spy')).toThrow();
 		expect(() => game.unlockTechnology(state, a.id, 'Tradecraft')).toThrow(); // Cryptography first
 		game.unlockTechnology(state, a.id, 'Cryptography');
-		expect([a.resources.materials, a.resources.knowledge]).toEqual([9, 26]);
+		expect([a.resources.materials, a.resources.knowledge]).toEqual([9, 27]);
 		expect(() => game.unlockTechnology(state, a.id, 'Cryptography')).toThrow(); // already yours
 		game.buyUnit(state, a.id, 'spy');
 		expect(game.technologyCost(state, b.id, 'Cryptography')).toEqual([
 			{ amount: 1, resourceType: 'materials' },
-			{ amount: 3, resourceType: 'knowledge' }
+			{ amount: 2, resourceType: 'knowledge' }
 		]);
-		expect(game.technologyCost(state, b.id, 'Tradecraft')[1].amount).toBe(9);
+		expect(game.technologyCost(state, b.id, 'Tradecraft')[1].amount).toBe(8);
+	});
+
+	test('a level 4 technology also costs the talent of its column', () => {
+		const { state, a } = twoPlayers();
+		a.unlockedTechnologies = ['Cryptography', 'Tradecraft', 'Counter intelligence'];
+		a.resources.materials = 13;
+		a.resources.knowledge = 25;
+		a.talents = [];
+		expect(() => game.unlockTechnology(state, a.id, 'Covert operations')).toThrow();
+		a.talents = ['craftsman'];
+		game.unlockTechnology(state, a.id, 'Covert operations');
+		expect(a.talents).toEqual([]);
+		expect(state.peoplePool).toContain('craftsman');
 	});
 
 	test('tradecraft adds what your spies take to your cap, covert operations take the whole cap', () => {

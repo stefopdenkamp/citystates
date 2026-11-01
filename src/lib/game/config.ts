@@ -33,34 +33,34 @@ export const buildings: BuildingStats[] = [
 	{ name: 'estate', level: 2, resourceType: 'people', cost: [{ amount: 5, resourceType: 'people' }], cap: 4 },
 
 	{ name: 'blacksmith', level: 1, resourceType: 'materials', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'armoury', level: 2, resourceType: 'materials', production: 3, cost: [{ amount: 3, resourceType: 'materials' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'barracks', level: 3, resourceType: 'materials', production: 7, cost: [{ amount: 7, resourceType: 'materials' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'craftsman' }], cap: 15 },
-	{ name: 'factory', level: 4, resourceType: 'materials', production: 10, cost: [{ amount: 15, resourceType: 'materials' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'craftsman' }], cap: 25 },
+	{ name: 'armoury', level: 2, resourceType: 'materials', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'materials' }], cap: 9 },
+	{ name: 'barracks', level: 3, resourceType: 'materials', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'materials' }, { amount: 1, resourceType: 'craftsman' }], cap: 15 },
+	{ name: 'factory', level: 4, resourceType: 'materials', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'materials' }, { amount: 1, resourceType: 'craftsman' }], cap: 25 },
 
 	{ name: 'stall', level: 1, resourceType: 'gold', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'shop', level: 2, resourceType: 'gold', production: 3, cost: [{ amount: 3, resourceType: 'gold' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'market place', level: 3, resourceType: 'gold', production: 7, cost: [{ amount: 7, resourceType: 'gold' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'merchant' }], cap: 15 },
-	{ name: 'bank', level: 4, resourceType: 'gold', production: 10, cost: [{ amount: 15, resourceType: 'gold' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'merchant' }], cap: 25 },
+	{ name: 'shop', level: 2, resourceType: 'gold', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'gold' }], cap: 9 },
+	{ name: 'market place', level: 3, resourceType: 'gold', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'gold' }, { amount: 1, resourceType: 'merchant' }], cap: 15 },
+	{ name: 'bank', level: 4, resourceType: 'gold', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'gold' }, { amount: 1, resourceType: 'merchant' }], cap: 25 },
 
 	{ name: 'shrine', level: 1, resourceType: 'faith', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'chapel', level: 2, resourceType: 'faith', production: 3, cost: [{ amount: 3, resourceType: 'faith' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'church', level: 3, resourceType: 'faith', production: 7, cost: [{ amount: 7, resourceType: 'faith' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'messiah' }], cap: 15 },
-	{ name: 'cathedral', level: 4, resourceType: 'faith', production: 10, cost: [{ amount: 15, resourceType: 'faith' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'messiah' }], cap: 25 },
+	{ name: 'chapel', level: 2, resourceType: 'faith', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'faith' }], cap: 9 },
+	{ name: 'church', level: 3, resourceType: 'faith', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'faith' }, { amount: 1, resourceType: 'messiah' }], cap: 15 },
+	{ name: 'cathedral', level: 4, resourceType: 'faith', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'faith' }, { amount: 1, resourceType: 'messiah' }], cap: 25 },
 
 	{ name: 'giullare', level: 1, resourceType: 'culture', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'studiolo', level: 2, resourceType: 'culture', production: 3, cost: [{ amount: 3, resourceType: 'culture' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'museum', level: 3, resourceType: 'culture', production: 7, cost: [{ amount: 7, resourceType: 'culture' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'artist' }], cap: 15 },
-	{ name: 'opera house', level: 4, resourceType: 'culture', production: 10, cost: [{ amount: 15, resourceType: 'culture' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'artist' }], cap: 25 },
+	{ name: 'studiolo', level: 2, resourceType: 'culture', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'culture' }], cap: 9 },
+	{ name: 'museum', level: 3, resourceType: 'culture', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'culture' }, { amount: 1, resourceType: 'artist' }], cap: 15 },
+	{ name: 'opera house', level: 4, resourceType: 'culture', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'culture' }, { amount: 1, resourceType: 'artist' }], cap: 25 },
 
 	{ name: "scribe's chamber", level: 1, resourceType: 'knowledge', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'library', level: 2, resourceType: 'knowledge', production: 3, cost: [{ amount: 3, resourceType: 'knowledge' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'school', level: 3, resourceType: 'knowledge', production: 7, cost: [{ amount: 7, resourceType: 'knowledge' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'scientist' }], cap: 15 },
-	{ name: 'university', level: 4, resourceType: 'knowledge', production: 10, cost: [{ amount: 15, resourceType: 'knowledge' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'scientist' }], cap: 25 },
+	{ name: 'library', level: 2, resourceType: 'knowledge', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'knowledge' }], cap: 9 },
+	{ name: 'school', level: 3, resourceType: 'knowledge', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'knowledge' }, { amount: 1, resourceType: 'scientist' }], cap: 15 },
+	{ name: 'university', level: 4, resourceType: 'knowledge', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'knowledge' }, { amount: 1, resourceType: 'scientist' }], cap: 25 },
 
 	{ name: 'forum', level: 1, resourceType: 'power', production: 1, cost: [{ amount: 1, resourceType: 'people' }], cap: 4 },
-	{ name: 'town council', level: 2, resourceType: 'power', production: 3, cost: [{ amount: 3, resourceType: 'power' }, { amount: 3, resourceType: 'people' }], cap: 9 },
-	{ name: 'city hall', level: 3, resourceType: 'power', production: 7, cost: [{ amount: 7, resourceType: 'power' }, { amount: 5, resourceType: 'people' }, { amount: 1, resourceType: 'politician' }], cap: 15 },
-	{ name: 'parliament', level: 4, resourceType: 'power', production: 10, cost: [{ amount: 15, resourceType: 'power' }, { amount: 8, resourceType: 'people' }, { amount: 1, resourceType: 'politician' }], cap: 25 }
+	{ name: 'town council', level: 2, resourceType: 'power', production: 3, cost: [{ amount: 2, resourceType: 'people' }, { amount: 3, resourceType: 'power' }], cap: 9 },
+	{ name: 'city hall', level: 3, resourceType: 'power', production: 8, cost: [{ amount: 4, resourceType: 'people' }, { amount: 8, resourceType: 'power' }, { amount: 1, resourceType: 'politician' }], cap: 15 },
+	{ name: 'parliament', level: 4, resourceType: 'power', production: 15, cost: [{ amount: 6, resourceType: 'people' }, { amount: 15, resourceType: 'power' }, { amount: 1, resourceType: 'politician' }], cap: 25 }
 ];
 
 export type UnitStats = {
@@ -205,28 +205,28 @@ const costs = (resource: ResourceType, amount: number, knowledge: number): Cost[
 // A column is unlocked from the top down (the first is shown at the top).
 export const technologies: InvestmentStats[][] = [
 	[
-		{ name: 'Cryptography', description: "Unlock spies: place them on your opponents' buildings to lower the cap of that resource by 1", cost: costs('materials', 1, 4), effect: 'spies' },
-		{ name: 'Tradecraft', description: 'The cap your spies lower is added to your own cap', cost: costs('materials', 5, 9), effect: 'siphoning' },
-		{ name: 'Counter intelligence', description: 'Place a spy on your own building to stop others from placing theirs on it', cost: costs('materials', 9, 11), effect: 'counterIntelligence' },
-		{ name: 'Covert operations', description: 'Your spies take away the whole cap of the building they are on', cost: costs('materials', 13, 20), effect: 'covertOperations' }
+		{ name: 'Cryptography', description: "Unlock spies: place them on your opponents' buildings to lower the cap of that resource by 1", cost: costs('materials', 1, 3), effect: 'spies' },
+		{ name: 'Tradecraft', description: 'The cap your spies lower is added to your own cap', cost: costs('materials', 4, 8), effect: 'siphoning' },
+		{ name: 'Counter intelligence', description: 'Place a spy on your own building to stop others from placing theirs on it', cost: costs('materials', 8, 14), effect: 'counterIntelligence' },
+		{ name: 'Covert operations', description: 'Your spies take away the whole cap of the building they are on', cost: [...costs('materials', 13, 25), { amount: 1, resourceType: 'craftsman' }], effect: 'covertOperations' }
 	],
 	[
-		{ name: 'Coinage', description: 'Traders can trade 1 for 1', cost: costs('gold', 1, 4), effect: 'coinage' },
-		{ name: 'Caravans', description: 'Traders have no trade limit', cost: costs('gold', 5, 9), effect: 'caravans' },
-		{ name: 'Infrastructure', description: "Traders can trade 2 of your opponent's resources for 1 of yours", cost: costs('gold', 9, 11), effect: 'infrastructure' },
-		{ name: 'Interest', description: 'Upcoming generations receive an additional +1 gold, then +2 gold, etc.', cost: costs('gold', 13, 20), effect: 'interest' }
+		{ name: 'Coinage', description: 'Traders can trade 1 for 1', cost: costs('gold', 1, 3), effect: 'coinage' },
+		{ name: 'Caravans', description: 'Traders have no trade limit', cost: costs('gold', 4, 8), effect: 'caravans' },
+		{ name: 'Infrastructure', description: "Traders can trade 2 of your opponent's resources for 1 of yours", cost: costs('gold', 8, 14), effect: 'infrastructure' },
+		{ name: 'Interest', description: 'Upcoming generations receive an additional +1 gold, then +2 gold, etc.', cost: [...costs('gold', 13, 25), { amount: 1, resourceType: 'merchant' }], effect: 'interest' }
 	],
 	[
-		{ name: 'Inquisition', description: 'Unlock inquisitors: they reduce 1 production of a building, or remove all missionaries and inquisitors on it', cost: costs('faith', 1, 4), effect: 'inquisitors' },
-		{ name: 'Tithes', description: 'The production your missionaries and inquisitors reduce is added to your own production', cost: costs('faith', 5, 9), effect: 'devotion' },
-		{ name: 'Persecution', description: 'Place an inquisitor on your own building to stop others from placing their missionaries and inquisitors on it', cost: costs('faith', 9, 11), effect: 'persecution' },
-		{ name: 'Pilgrimage', description: 'Your inquisitors reduce all production of the building they are on', cost: costs('faith', 13, 20), effect: 'fervor' }
+		{ name: 'Inquisition', description: 'Unlock inquisitors: they reduce 1 production of a building, or remove all missionaries and inquisitors on it', cost: costs('faith', 1, 3), effect: 'inquisitors' },
+		{ name: 'Tithes', description: 'The production your missionaries and inquisitors reduce is added to your own production', cost: costs('faith', 4, 8), effect: 'devotion' },
+		{ name: 'Persecution', description: 'Place an inquisitor on your own building to stop others from placing their missionaries and inquisitors on it', cost: costs('faith', 8, 14), effect: 'persecution' },
+		{ name: 'Pilgrimage', description: 'Your inquisitors reduce all production of the building they are on', cost: [...costs('faith', 13, 25), { amount: 1, resourceType: 'messiah' }], effect: 'fervor' }
 	],
 	[
-		{ name: 'Propaganda posters', description: "Click on an opponent's regular person and pay 3 culture to convince them to join you", cost: costs('culture', 1, 4), effect: 'propaganda' },
-		{ name: 'Reeducation programs', description: 'Click on one of your talents and pay 8 culture to reeducate them to another talent', cost: costs('culture', 5, 9), effect: 'retraining' },
-		{ name: 'Fresco paintings', description: "Click on an opponent's talent and pay 12 culture to convince them to join you", cost: costs('culture', 9, 11), effect: 'indoctrination' },
-		{ name: 'Gothic engineering', description: 'Build level 3 and 4 buildings directly, without the building one level lower', cost: costs('culture', 13, 20), effect: 'gothicEngineering' }
+		{ name: 'Propaganda posters', description: "Click on an opponent's regular person and pay 3 culture to convince them to join you", cost: costs('culture', 1, 3), effect: 'propaganda' },
+		{ name: 'Reeducation programs', description: 'Click on one of your talents and pay 8 culture to reeducate them to another talent', cost: costs('culture', 4, 8), effect: 'retraining' },
+		{ name: 'Fresco paintings', description: "Click on an opponent's talent and pay 12 culture to convince them to join you", cost: costs('culture', 8, 14), effect: 'indoctrination' },
+		{ name: 'Gothic engineering', description: 'Build level 3 and 4 buildings directly, without the building one level lower', cost: [...costs('culture', 13, 25), { amount: 1, resourceType: 'artist' }], effect: 'gothicEngineering' }
 	]
 ];
 
@@ -259,7 +259,7 @@ export const policies: InvestmentStats[][] = [
 		{
 			name: 'Agrarian reform',
 			description: `Each farm and estate increases your people cap by ${agrarianReformPeopleCap} more`,
-			cost: [{ amount: 20, resourceType: 'materials' }, { amount: 18, resourceType: 'power' }],
+			cost: [{ amount: 20, resourceType: 'materials' }, { amount: 18, resourceType: 'power' }, { amount: 1, resourceType: 'scientist' }],
 			effect: 'agrarianReform',
 			color: 'people'
 		}
@@ -267,27 +267,27 @@ export const policies: InvestmentStats[][] = [
 	[
 		{ name: 'Defensive strategies', description: 'You can put armies on your own farms', cost: [{ amount: 6, resourceType: 'materials' }, { amount: 6, resourceType: 'power' }] },
 		{ name: 'Centralized logistics', description: 'The cap your armies reduce will be added to your cap', cost: [{ amount: 14, resourceType: 'materials' }, { amount: 16, resourceType: 'power' }] },
-		{ name: 'War machine', description: 'Armies cost 1 person and 1 material', cost: [{ amount: 20, resourceType: 'materials' }, { amount: 18, resourceType: 'power' }] }
+		{ name: 'War machine', description: 'Armies cost 1 person and 1 material', cost: [{ amount: 20, resourceType: 'materials' }, { amount: 18, resourceType: 'power' }, { amount: 1, resourceType: 'craftsman' }] }
 	],
 	[
 		{ name: 'Mercenary warfare', description: 'Unlock mercenaries: armies you pay with gold', cost: [{ amount: 6, resourceType: 'gold' }, { amount: 6, resourceType: 'power' }], effect: 'mercenaries' },
 		{ name: 'Ambassador bribes', description: "Click on an opponent's unit (except Inquisitors) on one of your buildings and pay 12 gold to remove it", cost: [{ amount: 14, resourceType: 'gold' }, { amount: 16, resourceType: 'power' }], effect: 'bribery' },
-		{ name: 'Tax reformation', description: 'Each time an opponent uses a spy, trader, missionary or inquisitor on you, they have to pay you 1 gold', cost: [{ amount: 20, resourceType: 'gold' }, { amount: 18, resourceType: 'power' }], effect: 'taxes' }
+		{ name: 'Tax reformation', description: 'Each time an opponent uses a spy, trader, missionary or inquisitor on you, they have to pay you 1 gold', cost: [{ amount: 20, resourceType: 'gold' }, { amount: 18, resourceType: 'power' }, { amount: 1, resourceType: 'merchant' }], effect: 'taxes' }
 	],
 	[
-		{ name: 'Freedom of speech', description: 'Remove a missionary for 8 power', cost: [{ amount: 6, resourceType: 'faith' }, { amount: 6, resourceType: 'power' }] },
+		{ name: 'Freedom of speech', description: 'Remove missionaries for 8 power', cost: [{ amount: 6, resourceType: 'faith' }, { amount: 6, resourceType: 'power' }] },
 		{ name: 'Holy sacraments', description: "Each opponent's missionary on your buildings gives you 1 faith each generation", cost: [{ amount: 14, resourceType: 'faith' }, { amount: 16, resourceType: 'power' }] },
-		{ name: 'Theocracy', description: 'Use faith interchangeably with power', cost: [{ amount: 20, resourceType: 'faith' }, { amount: 18, resourceType: 'power' }] }
+		{ name: 'Theocracy', description: 'Use faith interchangeably with power', cost: [{ amount: 20, resourceType: 'faith' }, { amount: 18, resourceType: 'power' }, { amount: 1, resourceType: 'messiah' }] }
 	],
 	[
 		{ name: 'Work ethic', description: 'Spending a talented person on any building can count as 3 regular people', cost: [{ amount: 6, resourceType: 'culture' }, { amount: 6, resourceType: 'power' }] },
 		{ name: 'Subsidies', description: "Opponents can't convince your people to leave", cost: [{ amount: 14, resourceType: 'culture' }, { amount: 16, resourceType: 'power' }] },
-		{ name: 'Bread and circuses', description: "Each upcoming generation, every opponent's people cap goes down by 1 and yours up by 1 per opponent, unless or until that opponent has an opera house", cost: [{ amount: 20, resourceType: 'culture' }, { amount: 18, resourceType: 'power' }] }
+		{ name: 'Bread and circuses', description: "Each upcoming generation, every opponent's people cap goes down by 1 and yours up by 1 per opponent, unless or until that opponent has an opera house", cost: [{ amount: 20, resourceType: 'culture' }, { amount: 18, resourceType: 'power' }, { amount: 1, resourceType: 'artist' }] }
 	],
 	[
 		{ name: 'Espionage', description: 'When an opponent has a technology it costs 0 knowledge', cost: [{ amount: 15, resourceType: 'power' }] },
 		{ name: 'Isolationism', description: 'Nobody can trade with you and you cannot trade with anybody else', cost: [{ amount: 20, resourceType: 'power' }], effect: 'isolationism' },
-		{ name: 'Centralization', description: "If you don't have enough of a resource you can use power instead", cost: [{ amount: 30, resourceType: 'power' }] }
+		{ name: 'Centralization', description: "If you don't have enough of a resource you can use power instead", cost: [{ amount: 30, resourceType: 'power' }, { amount: 1, resourceType: 'politician' }] }
 	]
 ];
 
@@ -309,3 +309,34 @@ export const taxGold = 1;
 
 // The gold it costs to remove an opponent's unit from your building (Bribery).
 export const bribeGold = 12;
+
+// The tutorial: each step highlights the elements with one of its data-tutorial targets and explains them.
+// The text may use <b> and <u>.
+export const tutorialSteps: { targets: string[]; text: string }[] = [
+	{ targets: ['objectives'], text: 'Finish these objectives to win the game.' },
+	{
+		targets: ['people'],
+		text: 'At the beginning of each generation (a round) you get people. You get the number of people needed to fill the <b><u>cap</u></b>. The cap is your "capacity limit": you cannot gain more of a resource once you have reached the cap. To increase your cap buy farms, and upgrade farms to estates.'
+	},
+	{
+		targets: ['resources'],
+		text: 'The other resources work differently. Each building has a cap for its corresponding resource. Only the building with the highest cap counts. Upgrading a building to a better one increases your cap for that resource. Buildings also produce resources. Buy more buildings to get more resources. For example: a stall has a cap of 4 and produces 1 gold, so it will take 4 generations to reach that cap.'
+	},
+	{ targets: ['materials', 'units'], text: "With materials you can buy armies. Drag an army onto an opponent's farm or estate to block its cap." },
+	{
+		targets: ['gold', 'units'],
+		text: "With gold you can buy traders. Drag the trader onto an opponent's city centre. You can then choose which resources you and that opponent will trade."
+	},
+	{ targets: ['faith', 'units'], text: "With faith you can buy missionaries. Drag a missionary onto an opponent's building. That building's resource production is reduced by 1." },
+	{
+		targets: ['culture'],
+		text: 'With culture you can bid on talented people. You need talented people to buy level 3 and 4 buildings and level 4 technologies. Talented people can be used as regular people too.'
+	},
+	{ targets: ['knowledge', 'upgrades'], text: 'With knowledge you discover technologies: they unlock spies and inquisitors, and improve the other resources.' },
+	{ targets: ['power', 'upgrades'], text: 'With power you can buy and implement policies, which improve your abilities.' },
+	{ targets: ['turn'], text: "Here you see whose turn it is, and here you end your turn." },
+	{ targets: ['board'], text: 'This is the board. Here you place your buildings and units.' },
+	{ targets: ['chat'], text: 'Here you can type messages to the other players.' },
+	{ targets: ['log'], text: 'Everything that happens in the game is logged here.' },
+	{ targets: [], text: "Don't forget: you can hover over most things to get more information." }
+];

@@ -34,7 +34,7 @@
 </script>
 
 <aside>
-	<section>
+	<section data-tutorial="chat">
 		<h3>Chat</h3>
 		<ol bind:this={chatList}>
 			{#each game.chatHistory as message (message.at + message.playerId)}
@@ -56,7 +56,7 @@
 		</form>
 	</section>
 
-	<section>
+	<section data-tutorial="log">
 		<h3>Game log</h3>
 		<ol bind:this={logList}>
 			{#each game.log as entry, i (i)}

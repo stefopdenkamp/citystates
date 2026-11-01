@@ -37,7 +37,8 @@
 		...(game.isCityCentreEnabled ? ['City centre production'] : []),
 		...(game.isReligiousDominanceEnabled ? ['Religious dominance objective'] : []),
 		...(game.isBuildingLimitEnabled ? ['Building limit'] : []),
-		...(game.isTestMode ? ['Test mode'] : [])
+		...(game.isTestMode ? ['Test mode'] : []),
+		...(game.isTutorialEnabled ? ['Tutorial'] : [])
 	]);
 
 	// Colors and city states can only be chosen by one player.

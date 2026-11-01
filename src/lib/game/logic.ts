@@ -427,11 +427,13 @@ export const createGameState = (settings: GameSettings, id: string, lobbyPasswor
 	const maxPlayerCount = Math.max(minPlayerCount, Math.min(6, Math.floor(settings.maxPlayerCount || 6)));
 	const turnTimer = settings.turnTimer ? Math.max(1, Math.min(maxTurnTimer, Math.floor(settings.turnTimer))) : null;
 
-	const chosen = settings.objectives.filter((o): o is number => o !== 'random');
+	const picked = settings.objectives.slice(0, 3).filter((o) => o !== 'none');
+	if (picked.length === 0) fail('A game needs an objective');
+	const chosen = picked.filter((o): o is number => o !== 'random');
 	if (new Set(chosen).size !== chosen.length) fail('Objectives must be different');
 	if (chosen.some((o) => !objectiveList[o])) fail('Unknown objective');
 	const remaining = shuffle(objectiveList.map((_, i) => i).filter((i) => !chosen.includes(i)));
-	const objectives = settings.objectives.slice(0, 3).map((o) => (o === 'random' ? remaining.pop()! : o));
+	const objectives = picked.map((o) => (o === 'random' ? remaining.pop()! : o));
 
 	return {
 		id,
@@ -446,6 +448,7 @@ export const createGameState = (settings: GameSettings, id: string, lobbyPasswor
 		isReligiousDominanceEnabled: !!settings.isReligiousDominanceEnabled,
 		isBuildingLimitEnabled: !!settings.isBuildingLimitEnabled,
 		isTestMode: !!settings.isTestMode,
+		isTutorialEnabled: !!settings.isTutorialEnabled,
 		gameStatus: 'open',
 		phase: 'start',
 		players: [],

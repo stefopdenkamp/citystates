@@ -1,56 +1,50 @@
-# sv
+# City States of Italy
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This is a boardgame idea digitalized. Inspired by Sid Meiers Civilization, but not a civilization game.
 
-## Creating a project
+## How to install
 
-If you're seeing this, you've probably already done this step. Congrats!
+1. Install [bun](https://bun.sh) if you don't have it yet.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+   macOS, Linux and WSL:
 
-To recreate this project with the same configuration:
+   ```
+   curl -fsSL https://bun.sh/install | bash
+   ```
 
-```sh
-# recreate this project
-bun x sv@1.1.1 create --template minimal --types ts --add drizzle="database:sqlite+sqlite:libsql" --install bun .
-```
+   Windows:
 
-## Adding features
+   ```
+   powershell -c "irm bun.sh/install.ps1 | iex"
+   ```
 
-Add features to your project with `sv add`:
+2. Install the dependencies.
 
-```sh
-npx sv add
-```
+   ```
+   bun i
+   ```
 
-For example, to add Tailwind CSS:
+3. Set up the env.
 
-```sh
-npx sv add tailwindcss
-```
+   ```
+   cp .env.example .env
+   ```
 
-## Developing
+4. Set up the database. This creates the tables, and needs the `.env` from the previous step.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+   ```
+   bun run db:push
+   ```
 
-```sh
-npm run dev
+5. Run the game.
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+   ```
+   bun dev
+   ```
 
-## Building
+## How to play
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+- Create a game
+- You don't need to change any setting is the start up dialog
+- Wait for others to join
+- Press 'Ready' and 'Start game'

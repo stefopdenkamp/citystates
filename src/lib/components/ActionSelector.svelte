@@ -139,7 +139,7 @@
 
 <section class="actions">
 	<div class="columns">
-		<div class="column" data-resource="people">
+		<div class="column" data-resource="people" data-tutorial="people">
 			<h3>
 				People
 				{#if me}<span class="amount" title={`${peopleText(me)}\n\n${overviewText(game, me.id, 'people', 'cap')}`}>{peopleCount(me)}/<span class:blocked={isBlocked('people', ['army', 'mercenary'])}>{peopleCap(game, me.id)}</span></span>{/if}
@@ -169,7 +169,7 @@
 		</div>
 
 		{#each resourceTypes as resource (resource)}
-			<div class="column" data-resource={resource}>
+			<div class="column" data-resource={resource} data-tutorial="resources {resource}">
 				<h3>
 					{resource}
 					{#if me}
@@ -189,7 +189,7 @@
 		{/each}
 
 		<!-- each unit keeps the color of the resource it belongs to -->
-		<div class="column units">
+		<div class="column units" data-tutorial="units">
 			<!-- an empty second line where other columns show their amount, so the buttons align -->
 			<h3>Units <span class="amount">&nbsp;</span></h3>
 			<!-- 4 units per column, then the next column -->
@@ -210,7 +210,7 @@
 			</div>
 		</div>
 
-		<div class="column">
+		<div class="column" data-tutorial="upgrades">
 			<h3>Upgrades <span class="amount">&nbsp;</span></h3>
 			<button class="building" data-resource="knowledge" onclick={() => onOpenInvestment('technology')}>
 				<span class="building-name">Technologies</span>
@@ -223,7 +223,7 @@
 		</div>
 	</div>
 
-	<div class="turn">
+	<div class="turn" data-tutorial="turn">
 		{#if currentPlayer}
 			<span class="turn-label">{isMyTurn ? 'Your turn' : `${fullName(game, currentPlayer)}'s turn`}</span>
 			{#if secondsLeft !== null}
