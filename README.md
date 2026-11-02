@@ -30,7 +30,7 @@ This is a boardgame idea digitalized. Inspired by Sid Meiers Civilization, but n
    cp .env.example .env
    ```
 
-4. Set up the database. This creates the tables, and needs the `.env` from the previous step.
+4. Set up the database.
 
    ```
    bun run db:push
