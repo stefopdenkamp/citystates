@@ -3,11 +3,13 @@
 
 	// The tutorial: a dialog in the middle of the board that explains the game step by step, with the elements of
 	// each step highlighted. Not modal, so the highlighted parts stay visible.
-	let { onClose }: { onClose: () => void } = $props();
+	let { isReligiousDominanceEnabled = false, onClose }: { isReligiousDominanceEnabled?: boolean; onClose: () => void } = $props();
 
+	// the religious dominance step only when it is enabled
+	const steps = $derived(tutorialSteps.filter((s) => !s.isReligiousDominance || isReligiousDominanceEnabled));
 	let step = $state(0);
-	const current = $derived(tutorialSteps[step]);
-	const isLast = $derived(step === tutorialSteps.length - 1);
+	const current = $derived(steps[step]);
+	const isLast = $derived(step === steps.length - 1);
 
 	// the screen positions of the highlighted elements and the dialog, measured after rendering (the action selector
 	// and side bar come after the board) and again when the window resizes
@@ -52,7 +54,7 @@
 	);
 </script>
 
-<svelte:window onresize={() => resized++} onkeydown={(event) => event.key === 'Escape' && onClose()} />
+<svelte:window onresize={() => resized++} />
 
 {#each highlights as rect, i (i)}
 	<div class="highlight" style:left="{rect.left}px" style:top="{rect.top}px" style:width="{rect.width}px" style:height="{rect.height}px"></div>
@@ -73,7 +75,7 @@
 	<!-- the texts come from config.ts, written by hand -->
 	<p>{@html current.text}</p>
 	<div class="buttons">
-		<span class="counter">{step + 1}/{tutorialSteps.length}</span>
+		<span class="counter">{step + 1}/{steps.length}</span>
 		<button onclick={onClose}>Cancel tutorial</button>
 		<button class="primary" {@attach (node) => node.focus()} onclick={() => (isLast ? onClose() : step++)}>
 			{isLast ? 'Finish' : 'Next'}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { characteristicInfo, cityStates, colors, personalityTraits, titles } from '#lib/game/config.ts';
+	import { bots, characteristicInfo, characteristicLabels as labels, characteristicOptions as options, colors } from '#lib/game/config.ts';
 	import { canBeReady, canStart } from '#lib/game/logic.ts';
 	import type { Characteristic, ClientMessage, PublicGameState } from '#lib/game/types.ts';
 	import InfoIcon from './InfoIcon.svelte';
@@ -11,18 +11,6 @@
 		playerId,
 		send
 	}: { game: PublicGameState; playerId: string | null; send: (message: ClientMessage) => void } = $props();
-
-	const options: Record<Characteristic, string[]> = {
-		title: titles,
-		personalityTrait: personalityTraits,
-		cityState: cityStates
-	};
-
-	const labels: Record<Characteristic, string> = {
-		title: 'Titles',
-		personalityTrait: 'Personality traits',
-		cityState: 'City states'
-	};
 
 	// the column headers, in the order of a full name: "Anna the Wise Patron of Bologna"
 	const headers: Record<Characteristic, string> = {
@@ -35,8 +23,8 @@
 	const enabledParts = $derived([
 		...(Object.keys(labels) as Characteristic[]).filter((key) => game.enabledCharacteristics[key]).map((key) => labels[key]),
 		...(game.isCityCentreEnabled ? ['City centre production'] : []),
+		...(game.isBuildOverFarmsEnabled ? ['Build over farms'] : []),
 		...(game.isReligiousDominanceEnabled ? ['Religious dominance objective'] : []),
-		...(game.isBuildingLimitEnabled ? ['Building limit'] : []),
 		...(game.isTestMode ? ['Test mode'] : []),
 		...(game.isTutorialEnabled ? ['Tutorial'] : [])
 	]);
@@ -45,6 +33,11 @@
 	const others = $derived(game.players.filter((p) => p.id !== playerId));
 	const takenColors = $derived(new Set(others.map((p) => p.color)));
 	const takenCityStates = $derived(new Set(others.map((p) => p.characteristics.cityState)));
+
+	// a place for every player the game can have: the players and bots, then the empty places
+	const emptySlots = $derived(Math.max(0, game.maxPlayerCount - game.players.length));
+	// only players of the game (not spectators) can put bots in or take them out
+	const canChangeBots = $derived(!!playerId && game.players.some((p) => p.id === playerId));
 
 	const updateCharacteristic = (key: Characteristic, value: string) =>
 		send({ type: 'player:update', characteristics: { [key]: value } });
@@ -84,14 +77,27 @@
 					{/each}
 				</select>
 
-				<input
-					value={player.name}
-					disabled={!isMe}
-					required
-					maxlength="30"
-					aria-label="Name"
-					oninput={(event) => send({ type: 'player:update', name: event.currentTarget.value })}
-				/>
+				{#if player.bot}
+					<!-- a bot: choosing the empty place takes it out -->
+					<select
+						value={player.bot}
+						disabled={!canChangeBots}
+						aria-label="Bot"
+						onchange={(event) => event.currentTarget.value === '' && send({ type: 'bot:remove', playerId: player.id })}
+					>
+						<option value="">Empty place</option>
+						<option value={player.bot}>Bot: {player.name}</option>
+					</select>
+				{:else}
+					<input
+						value={player.name}
+						disabled={!isMe}
+						required
+						maxlength="30"
+						aria-label="Name"
+						oninput={(event) => send({ type: 'player:update', name: event.currentTarget.value })}
+					/>
+				{/if}
 
 				{#each columns as key (key)}
 					<select
@@ -119,6 +125,29 @@
 					/>
 					Ready
 				</label>
+			</li>
+		{/each}
+		<!-- an empty place: a bot can be put in it; a player who joins a full game takes the place of a bot -->
+		{#each { length: emptySlots }, i (i)}
+			<li class="empty-slot">
+				<span></span>
+				<select
+					class="empty"
+					value=""
+					disabled={!canChangeBots}
+					aria-label="Empty place"
+					onchange={(event) => {
+						if (event.currentTarget.value) send({ type: 'bot:add', bot: event.currentTarget.value });
+						event.currentTarget.value = '';
+					}}
+				>
+					<option value="">Empty place</option>
+					{#each bots as bot (bot)}
+						<option value={bot}>Bot: {bot}</option>
+					{/each}
+				</select>
+				{#each columns as key (key)}<span></span>{/each}
+				<span></span>
 			</li>
 		{/each}
 	</ul>
@@ -197,6 +226,14 @@
 		display: flex;
 		align-items: center;
 		gap: 0.3rem;
+	}
+
+	/* an empty place looks like a player, with a gray border */
+	li.empty-slot {
+		--slot-border: color-mix(in srgb, var(--color-grayscale-4) 70%, transparent);
+
+		border-color: var(--slot-border);
+		border-left-color: var(--slot-border);
 	}
 
 	/* your row: accent color until you choose a color, then your color */

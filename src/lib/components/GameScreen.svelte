@@ -1,14 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { bribeGold, buildings, objectives, taxGold, units, type Talent } from '#lib/game/config.ts';
-	import { bornMessage, fullName, hasEffect, hasTitle, hasTradedWith, isTaxed, objectiveOverview, objectiveProgress, quotedName, talentPayment, tradeLimitMessage, unitCost, unitImage } from '#lib/game/logic.ts';
-	import type { ClientMessage, PublicGameState, Unit } from '#lib/game/types.ts';
+	import { bribeGold, buildings, objectives, reeducationCost, units, type Talent } from '#lib/game/config.ts';
+	import { canSpend, cityCentreAmount, fullName, getPlayer, replacedBuildings, hasEffect, hasTradedWith, objectiveOverview, objectiveProgress, paymentRules, quotedName, religiousDominanceOverview, religiousDominanceProgress, talentPayment, tradeLimitMessage, traderTargets, unitCost } from '#lib/game/logic.ts';
+	import type { ClientMessage, PublicGameState, PublicPlayer, Unit } from '#lib/game/types.ts';
 	import ActionSelector from './ActionSelector.svelte';
 	import AuctionDialog from './AuctionDialog.svelte';
 	import Board from './Board.svelte';
+	import BornDialog from './BornDialog.svelte';
 	import LegacyDialog from './LegacyDialog.svelte';
-	import OpponentOverview from './OpponentOverview.svelte';
+	import PlayerBoard from './PlayerBoard.svelte';
 	import PoliciesDialog from './PoliciesDialog.svelte';
 	import RetrainDialog from './RetrainDialog.svelte';
 	import SavedOverlay from './SavedOverlay.svelte';
@@ -16,6 +17,7 @@
 	import Sidebar from './Sidebar.svelte';
 	import StatisticsDialog from './StatisticsDialog.svelte';
 	import TechnologiesDialog from './TechnologiesDialog.svelte';
+	import TradeDialog from './TradeDialog.svelte';
 	import Tutorial from './Tutorial.svelte';
 	import { alertPopup, confirmPopup } from '#lib/client/popup.svelte.ts';
 
@@ -26,12 +28,12 @@
 	}: { game: PublicGameState; playerId: string | null; send: (message: ClientMessage) => void } = $props();
 
 	let selectedBuilding = $state<string | null>(null);
-	let overviewPlayerId = $state<string | null>(null);
 	let openInvestment = $state<'technology' | 'policy' | null>(null);
+	// the generation whose born dialog you closed
+	let closedBornGeneration = $state<number | null>(null);
 	// the index of your talent being retrained (Reeducation programs)
 	let retrainIndex = $state<number | null>(null);
-	const overviewPlayer = $derived(game.players.find((p) => p.id === overviewPlayerId) ?? null);
-	// A trader placed on an opponent's city centre opens the overview to trade; the trader stays in stock until traded.
+	// A trader put on an opponent's player board opens the trade dialog; the trader stays in stock until traded.
 	let tradePlayerId = $state<string | null>(null);
 	const tradePlayer = $derived(game.players.find((p) => p.id === tradePlayerId) ?? null);
 
@@ -40,7 +42,6 @@
 
 	// The phase title fades in and out whenever it changes.
 	const phaseTitle = $derived.by(() => {
-		if (game.phase === 'born') return { key: `born-${game.stats.nrOfGenerations}`, text: 'A new generation is born' };
 		if (game.phase === 'legacy') return { key: `legacy-${game.stats.nrOfGenerations}`, text: 'The legacy of a generation' };
 		if (game.phase === 'action') {
 			const player = game.players[game.turnIndex];
@@ -67,16 +68,11 @@
 	const pay = (name: string, buy: (talents: Talent[]) => void) => {
 		if (!me) return;
 		if (game.isTestMode) return buy([]); // nothing is paid, so no talent to choose
-		const cost = units.some((u) => u.name === name) ? unitCost(game, me, name) : buildings.find((b) => b.name === name)!.cost;
-		const payment = talentPayment(me, cost, hasTitle(game, me, 'Philosopher'));
+		const isUnit = units.some((u) => u.name === name);
+		const cost = isUnit ? unitCost(game, me, name) : buildings.find((b) => b.name === name)!.cost;
+		const payment = talentPayment(me, cost, paymentRules(game, me, !isUnit));
 		if (payment && payment.choices > 0) pendingBuy = { name, payment, buy };
 		else buy([]);
-	};
-
-	// Tax reformation: using a spy, trader, missionary or inquisitor on its owner costs gold, so ask first.
-	const acceptsTax = async (targetId: string | undefined) => {
-		const target = game.players.find((p) => p.id === targetId);
-		return !me || !target || !isTaxed(me, target) || confirmPopup(`${fullName(game, target)} has strict taxes, you have to pay ${taxGold} gold. Are you sure?`);
 	};
 
 	// A building is bought when placed; a unit was bought before and comes from your stock.
@@ -84,21 +80,28 @@
 		const name = selectedBuilding;
 		if (!name) return;
 		selectedBuilding = null;
-		if (name === 'trader') {
-			// once per opponent each turn, unless you have Caravans
-			const targetId = game.players.find((p) => p.center.x === x && p.center.y === y)?.id ?? null;
-			if (me && targetId && hasTradedWith(me, targetId)) alertPopup(tradeLimitMessage);
-			else tradePlayerId = targetId;
-		} else if (units.some((u) => u.name === name)) {
-			const targetId = game.buildings.find((b) => b.x === x && b.y === y)?.ownerId;
-			if (name === 'army' || name === 'mercenary' || (await acceptsTax(targetId))) send({ type: 'deploy', unit: name as Unit['type'], x, y });
-		} else pay(name, (talents) => send({ type: 'build', building: name, x, y, talents }));
+		if (units.some((u) => u.name === name)) {
+			send({ type: 'deploy', unit: name as Unit['type'], x, y });
+		} else {
+			// placing a farm or estate over farms and estates (your own, or with "Build over farms" also those of
+			// opponents) removes them: ask first
+			const replaced = playerId ? replacedBuildings(game, playerId, name, x, y) : [];
+			const isFarmland = buildings.find((b) => b.name === name)?.resourceType === 'people';
+			if (isFarmland && replaced.length) {
+				const what = replaced
+					.map((b) => `${b.type === 'estate' ? 'an' : 'a'} ${b.type} of ${b.ownerId === playerId ? 'yours' : getPlayer(game, b.ownerId).name}`)
+					.join(' and ');
+				if (!(await confirmPopup(`Placing this ${name} removes ${what}. Are you sure?`))) return;
+			}
+			pay(name, (talents) => send({ type: 'build', building: name, x, y, talents }));
+		}
 	};
 
-	// Bribery: remove an opponent's unit from your building for gold.
+	// Ambassador bribes: remove an opponent's unit from your building for gold.
 	const bribe = async (unit: Unit) => {
 		const owner = game.players.find((p) => p.id === unit.ownerId);
-		if (owner && (await confirmPopup(`Do you want to bribe ${fullName(game, owner)}'s ${unit.type} away for ${bribeGold} gold?`))) {
+		const price = bribeGold[unit.type as keyof typeof bribeGold];
+		if (owner && (await confirmPopup(`Do you want to bribe ${fullName(game, owner)}'s ${unit.type} away for ${price} gold?`))) {
 			send({ type: 'unit:bribe', unitId: unit.id });
 		}
 	};
@@ -107,9 +110,22 @@
 
 	let boardScale = $state(1);
 
+	// The opponents whose player board a selected trader can go on.
+	const tradeTargets = $derived(selectedBuilding === 'trader' && isMyTurn && playerId ? traderTargets(game, playerId) : new Set<string>());
+	const startTrade = (targetId: string) => {
+		selectedBuilding = null;
+		// once per opponent each turn, unless you have Caravans
+		if (me && hasTradedWith(me, targetId)) alertPopup(tradeLimitMessage);
+		else tradePlayerId = targetId;
+	};
+
+	// Winning an opponent's people over with culture, during your turn; not from a player with Subsidies.
+	const canConvince = (player: PublicPlayer, effect: 'propagandaPosters' | 'frescoPaintings') =>
+		isMyTurn && !!me && player.id !== me.id && hasEffect(me, effect) && !hasEffect(player, 'subsidies');
+
 	// Warn when ending your turn before your city centre produces anything.
 	const endTurn = async () => {
-		const hasNoCentreResource = game.isCityCentreEnabled && !me?.cityCentreResource;
+		const hasNoCentreResource = !!me && cityCentreAmount(game, me) > 0 && !me.cityCentreResource;
 		if (hasNoCentreResource && !(await confirmPopup('You have not chosen a resource for your city centre yet. End your turn anyway?'))) return;
 		send({ type: 'turn:end' });
 	};
@@ -161,7 +177,17 @@
 			{/each}
 		</div>
 		{#if game.isReligiousDominanceEnabled}
-			<div class="religious-dominance">Religious dominance</div>
+			<!-- a bar per player, like the objectives: their missionaries and inquisitors on opponents' buildings inside the
+			     wall and city centres, 9 steps per opponent -->
+			<div class="religious-dominance" data-tutorial="religious-dominance" title={religiousDominanceOverview(game)}>
+				<div class="progress" aria-hidden="true">
+					{#each game.players as player (player.id)}
+						{@const progress = religiousDominanceProgress(game, player.id)}
+						<span class="bar" class:met={progress >= 1} data-color={player.color} style:height="{progress * 100}%"></span>
+					{/each}
+				</div>
+				<span class="objective-text">Religious dominance</span>
+			</div>
 		{/if}
 	</header>
 
@@ -172,10 +198,30 @@
 			{selectedBuilding}
 			onPlace={place}
 			onSetCityCentre={(resource) => send({ type: 'cityCentre:set', resource })}
-			onOpenOverview={(id) => (overviewPlayerId = id)}
-			onBribe={isMyTurn && me && hasEffect(me, 'bribery') && me.resources.gold >= bribeGold ? bribe : undefined}
+			onBribe={isMyTurn && me && hasEffect(me, 'ambassadorBribes') ? bribe : undefined}
 			bind:scale={boardScale}
-		/>
+		>
+			{#snippet playerBoard(player, vertical)}
+				{@const isMine = player.id === playerId}
+				<PlayerBoard
+					{game}
+					{player}
+					{vertical}
+					{me}
+					onPropaganda={canConvince(player, 'propagandaPosters') ? () => send({ type: 'person:propaganda', targetId: player.id }) : undefined}
+					onIndoctrinate={canConvince(player, 'frescoPaintings')
+						? (index) => send({ type: 'talent:indoctrinate', targetId: player.id, index })
+						: undefined}
+					{isMine}
+					selectedUnit={isMine ? selectedBuilding : null}
+					canUseUnits={isMine && isMyTurn}
+					onSelectUnit={isMine ? (unit) => (selectedBuilding = unit) : undefined}
+					onRetrain={isMine && isMyTurn && me && hasEffect(me, 'reeducationPrograms') ? (index) => (retrainIndex = index) : undefined}
+					isTarget={tradeTargets.has(player.id)}
+					onTarget={() => startTrade(player.id)}
+				/>
+			{/snippet}
+		</Board>
 
 		<!-- over the board, inside its area -->
 		{#if openInvestment === 'technology'}
@@ -198,31 +244,6 @@
 			/>
 		{/if}
 
-		<!-- your bought units, stacked from the bottom right; drag one onto the board to place it -->
-		{#if me}
-			<div class="unit-stock" style:--unit-scale={boardScale}>
-				<div class="stock-units">
-					{#each me.undeployedUnits ?? [] as unit, i (i)}
-						<button
-							class="stock-unit"
-							class:selected={selectedBuilding === unit}
-							data-resource={units.find((u) => u.name === unit)!.resourceType}
-							style:background-image="url('/games/citystates/images/pieces/{unitImage(unit)}.jpg')"
-							title={`${unit[0].toUpperCase() + unit.slice(1)}\n${units.find((u) => u.name === unit)!.description}`}
-							disabled={!isMyTurn}
-							draggable={isMyTurn}
-							ondragstart={(event) => {
-								event.dataTransfer?.setData('text/plain', unit);
-								selectedBuilding = unit;
-							}}
-							onclick={() => (selectedBuilding = selectedBuilding === unit ? null : unit)}
-							aria-label={unit}
-						></button>
-					{/each}
-				</div>
-			</div>
-		{/if}
-
 		{#if phaseTitle}
 			{#key phaseTitle.key}
 				<h2 class="phase-title">{phaseTitle.text}</h2>
@@ -230,16 +251,9 @@
 		{/if}
 
 		{#if isTutorialOpen && game.gameStatus === 'inProgress'}
-			<Tutorial onClose={closeTutorial} />
+			<Tutorial isReligiousDominanceEnabled={!!game.isReligiousDominanceEnabled} onClose={closeTutorial} />
 		{/if}
 
-		{#if game.phase === 'born' && game.lastBorn}
-			{#key game.stats.nrOfGenerations}
-				<p class="born-message">
-					{bornMessage(game.lastBorn.people, game.lastBorn.talents, 'exceptionally talented')}
-				</p>
-			{/key}
-		{/if}
 	</div>
 
 	<ActionSelector
@@ -252,14 +266,19 @@
 			(selectedBuilding = toggle && selectedBuilding === building ? null : building)}
 		onEndTurn={endTurn}
 		onOpenInvestment={(kind) => (openInvestment = kind)}
-		onRetrain={(index) => (retrainIndex = index)}
+		{boardScale}
 		onQuit={async () => (await confirmPopup('Are you sure you want to quit? The game will be paused for the other players.')) && goto(resolve('/'))}
 	/>
 
 	<Sidebar {game} canChat={!!me} onChat={(text) => send({ type: 'chat', text })} />
 </div>
 
-{#if game.gameStatus === 'inProgress' && game.phase === 'auction' && game.auction}
+<!-- the tutorial comes first, then the born dialog: everyone born, the talents among them; closing it goes on to the bidding -->
+{#if isTutorialOpen}
+	<!-- the born dialog and the bidding wait until the tutorial is done or cancelled -->
+{:else if game.gameStatus === 'inProgress' && (game.phase === 'auction' || game.phase === 'action') && me && game.lastBorn && closedBornGeneration !== game.stats.nrOfGenerations}
+	<BornDialog {game} {me} onClose={() => (closedBornGeneration = game.stats.nrOfGenerations)} />
+{:else if game.gameStatus === 'inProgress' && game.phase === 'auction' && game.auction}
 	<!-- a fresh dialog for every talent, so the next auction is clearly a new one -->
 	{#key game.auction.queue.length}
 		<AuctionDialog {game} {me} {send} />
@@ -270,36 +289,22 @@
 	<LegacyDialog {game} {me} onNext={() => send({ type: 'legacy:next' })} />
 {/if}
 
-{#if tradePlayer}
-	<OpponentOverview
+{#if tradePlayer && me}
+	<TradeDialog
 		{game}
 		player={tradePlayer}
 		{me}
-		onTrade={async (give, take) => {
-			const targetId = tradePlayer.id;
-			if (await acceptsTax(targetId)) send({ type: 'trade', targetId, give, take });
+		onTrade={(give, take) => {
+			send({ type: 'trade', targetId: tradePlayer.id, give, take });
 		}}
 		onClose={() => (tradePlayerId = null)}
-	/>
-{:else if overviewPlayer}
-	<OpponentOverview
-		{game}
-		player={overviewPlayer}
-		{me}
-		onIndoctrinate={isMyTurn && me && hasEffect(me, 'indoctrination')
-			? (index) => send({ type: 'talent:indoctrinate', targetId: overviewPlayer.id, index })
-			: undefined}
-		onPropaganda={isMyTurn && me && hasEffect(me, 'propaganda')
-			? () => send({ type: 'person:propaganda', targetId: overviewPlayer.id })
-			: undefined}
-		onClose={() => (overviewPlayerId = null)}
 	/>
 {/if}
 
 {#if retrainIndex !== null && me?.talents[retrainIndex] && isMyTurn}
 	<RetrainDialog
 		talent={me.talents[retrainIndex]}
-		culture={me.resources.culture}
+		canPay={canSpend(game, me, [{ amount: reeducationCost, resourceType: 'culture' }])}
 		onRetrain={(talent) => {
 			send({ type: 'talent:retrain', index: retrainIndex!, talent });
 			retrainIndex = null;
@@ -310,7 +315,9 @@
 
 {#if pendingBuy && isMyTurn}
 	<TalentDialog
-		building={pendingBuy.name}
+		name={pendingBuy.name}
+		isUnit={units.some((u) => u.name === pendingBuy!.name)}
+		isWorkEthic={!!me && paymentRules(game, me, true).workEthic && !units.some((u) => u.name === pendingBuy!.name)}
 		{...pendingBuy.payment}
 		onConfirm={confirmBuy}
 		onCancel={() => (pendingBuy = null)}
@@ -409,6 +416,7 @@
 
 	/* half the height of the objectives, the full width of the board */
 	.religious-dominance {
+		position: relative;
 		padding: 0.05rem 0.6rem;
 		text-align: center;
 
@@ -423,54 +431,7 @@
 		overflow: hidden;
 	}
 
-	/* transparent and click-through, so the board can be dragged under it */
-	.unit-stock {
-		--unit-size: calc(var(--board-cell-size) * 0.55 * var(--unit-scale));
-		--stock-gap: 0.3rem;
-
-		position: absolute;
-		inset: 0.5rem;
-		z-index: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: var(--stock-gap);
-
-		pointer-events: none;
-	}
-
-	/* fills up bottom to top, then right to left */
-	.stock-units {
-		display: flex;
-		flex: 1;
-		flex-direction: column-reverse;
-		flex-wrap: wrap-reverse;
-		align-content: flex-start;
-		gap: var(--stock-gap);
-		align-self: stretch;
-		min-height: 0;
-	}
-
-	/* the same size and look as a unit on the board, with a border in its resource color */
-	.stock-unit {
-		width: var(--unit-size);
-		height: var(--unit-size);
-		padding: 0;
-
-		background: center / cover no-repeat;
-		border: calc(2px * var(--unit-scale)) solid var(--resource-color);
-		border-radius: 50%;
-
-		cursor: grab;
-		pointer-events: auto;
-	}
-
-	.stock-unit.selected {
-		outline: 2px solid var(--color-accent);
-	}
-
-	.phase-title,
-	.born-message {
+	.phase-title {
 		position: absolute;
 		top: 50%;
 		left: 50%;
@@ -487,14 +448,6 @@
 
 		animation: fade var(--phase-title-speed) ease-in-out;
 		pointer-events: none;
-	}
-
-	/* the born message fades in after the phase title has faded out */
-	.born-message {
-		color: var(--color-grayscale-6);
-		font: var(--font-normal);
-
-		animation-delay: var(--phase-title-speed);
 	}
 
 	@keyframes fade {

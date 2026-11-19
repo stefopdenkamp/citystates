@@ -5,7 +5,8 @@ import { eq } from 'drizzle-orm';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { db } from './db';
 import { gamestate, password } from './db/schema';
-import { bornPhaseMs } from '../game/config';
+import { botDelayMs, bornPhaseMs } from '../game/config';
+import { hasBotWork, runBot } from '../game/bot';
 import * as game from '../game/logic';
 import type { ClientMessage, GameState, LobbyGame, ServerMessage } from '../game/types';
 
@@ -19,6 +20,7 @@ type Shared = {
 	connections: Map<WebSocket, Connection>;
 	games: Map<string, GameState>;
 	timers: Map<string, { key: string; timeout: ReturnType<typeof setTimeout> }>;
+	botTimers: Map<string, ReturnType<typeof setTimeout>>;
 	wss: WebSocketServer;
 	onMessage: (ws: WebSocket, data: string) => Promise<void>;
 	onClose: (ws: WebSocket) => void;
@@ -27,11 +29,13 @@ const shared: Shared = ((globalThis as { __citystates?: Shared }).__citystates ?
 	connections: new Map(),
 	games: new Map(),
 	timers: new Map(),
+	botTimers: new Map(),
 	wss: new WebSocketServer({ noServer: true }),
 	onMessage: async () => {},
 	onClose: () => {}
 });
-const { connections, games, timers } = shared;
+shared.botTimers ??= new Map(); // missing when an older version of this module made the shared state
+const { connections, games, timers, botTimers } = shared;
 
 // ---- persistence ----
 
@@ -58,9 +62,9 @@ const loadGame = async (id: string) => {
 	const row = await db.query.gamestate.findFirst({ where: eq(gamestate.id, id) });
 	if (!row) return null;
 	const state = row.state as GameState;
-	// Nobody is connected to a game that was not in memory, e.g. after a server restart.
+	// Nobody is connected to a game that was not in memory, e.g. after a server restart; bots always are.
 	for (const player of state.players) {
-		if (player.isConnected) game.disconnectPlayer(state, player.id, Date.now());
+		if (player.isConnected && !player.bot) game.disconnectPlayer(state, player.id, Date.now());
 	}
 	games.set(id, state);
 	return state;
@@ -87,8 +91,9 @@ const lobbyList = async (): Promise<LobbyGame[]> => {
 			gameStatus: !isLoaded && state.gameStatus === 'inProgress' ? 'saved' : state.gameStatus,
 			// Players leave an open game when they disconnect, so one that is not in memory has nobody in it.
 			playerCount: !isLoaded && state.gameStatus === 'open' ? 0 : state.players.length,
-			connectedCount: isLoaded ? state.players.filter((p) => p.isConnected).length : 0,
+			connectedCount: isLoaded ? state.players.filter((p) => p.isConnected && !p.bot).length : 0,
 			maxPlayerCount: state.maxPlayerCount,
+			botCount: state.players.filter((p) => p.bot).length,
 			hasPassword: state.lobbyPasswordId !== null,
 			winners: (state.winnerIds ?? []).map((id) => {
 				const { name, color } = game.getPlayer(state, id);
@@ -98,6 +103,7 @@ const lobbyList = async (): Promise<LobbyGame[]> => {
 };
 
 const broadcastLobby = async () => {
+	if (![...connections.values()].some((connection) => connection.inLobby)) return;
 	const games = await lobbyList();
 	for (const [ws, connection] of connections) {
 		if (connection.inLobby) send(ws, { type: 'lobby:list', games });
@@ -140,8 +146,26 @@ const schedule = (state: GameState) => {
 	timers.set(state.id, { key, timeout });
 };
 
+// The bots act a moment after each change, one at a time, so everyone can follow what they do.
+const scheduleBots = (state: GameState) => {
+	if (botTimers.has(state.id) || !hasBotWork(state)) return;
+	const timeout = setTimeout(() => {
+		botTimers.delete(state.id);
+		if (games.get(state.id) !== state) return;
+		try {
+			if (!runBot(state, Date.now())) return;
+		} catch (error) {
+			console.error(error);
+			return;
+		}
+		changed(state).catch((error) => console.error(error));
+	}, botDelayMs);
+	botTimers.set(state.id, timeout);
+};
+
 const changed = async (state: GameState) => {
 	schedule(state);
+	scheduleBots(state);
 	broadcastGame(state);
 	await save(state);
 	await broadcastLobby();
@@ -177,11 +201,13 @@ const handlers: {
 	'lobby:delete': async (_ws, _connection, { gameId }) => {
 		const state = await loadGame(gameId);
 		if (!state) throw new Error('This game does not exist anymore');
-		if (!['saved', 'open', 'finished'].includes(state.gameStatus) || state.players.some((p) => p.isConnected)) {
+		if (!['saved', 'open', 'finished'].includes(state.gameStatus) || state.players.some((p) => p.isConnected && !p.bot)) {
 			throw new Error('Only open, saved or finished games without connected players can be deleted');
 		}
 		clearTimeout(timers.get(gameId)?.timeout);
 		timers.delete(gameId);
+		clearTimeout(botTimers.get(gameId));
+		botTimers.delete(gameId);
 		games.delete(gameId);
 		await db.delete(gamestate).where(eq(gamestate.id, gameId));
 		if (state.lobbyPasswordId) await db.delete(password).where(eq(password.id, state.lobbyPasswordId));
@@ -190,7 +216,8 @@ const handlers: {
 
 	'game:join': async (ws, connection, { gameId, token, password: plain }) => {
 		const state = await loadGame(gameId);
-		if (!state || state.gameStatus === 'finished') throw new Error('This game does not exist anymore');
+		if (!state) throw new Error('This game does not exist anymore');
+		if (state.gameStatus === 'finished') throw new Error('This game is finished');
 		connection.inLobby = false;
 
 		const returning = token ? state.players.find((p) => p.token === token) : undefined;
@@ -212,6 +239,7 @@ const handlers: {
 			}
 		}
 
+		if (state.gameStatus === 'inProgress') throw new Error('This game is in progress');
 		connection.gameId = gameId;
 		if (state.gameStatus === 'open') {
 			const player = game.addPlayer(state);
@@ -235,6 +263,21 @@ const handlers: {
 		player.token = crypto.randomUUID(); // the old browser can no longer reconnect as this player
 		connection.playerId = player.id;
 		send(ws, { type: 'game:joined', playerId: player.id, token: player.token });
+		await changed(state);
+	},
+
+	// any player of an open game can put a bot in an empty place, or take one out
+	'bot:add': async (_ws, connection, { bot }) => {
+		const state = currentGame(connection);
+		currentPlayer(connection);
+		game.addBot(state, bot);
+		await changed(state);
+	},
+
+	'bot:remove': async (_ws, connection, { playerId }) => {
+		const state = currentGame(connection);
+		currentPlayer(connection);
+		game.removeBot(state, playerId);
 		await changed(state);
 	},
 

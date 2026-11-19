@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { talentResource } from '#lib/game/config.ts';
-	import { bidLabel, bidTotal, cultureWorth, fullName, getPlayer } from '#lib/game/logic.ts';
+	import { bidLabel, cultureWorth, fullName, getPlayer, hasEffect } from '#lib/game/logic.ts';
 	import type { Auction, ClientMessage, PublicGameState, PublicPlayer } from '#lib/game/types.ts';
 
 	let {
@@ -17,14 +17,19 @@
 	const usesCulture = $derived(resource !== 'culture');
 	const myBid = $derived(me ? (auction.bids[me.id] ?? 0) : 0);
 	const myCulture = $derived(me ? (auction.cultureBids?.[me.id] ?? 0) : 0);
+	// with Centralization power can pay what you lack
+	const extra = $derived(me && hasEffect(me, 'centralization') ? me.resources.power : 0);
 
-	// eligible is in turn order from the first player, so the first highest bid is the one that wins a tie
-	const highest = $derived(
-		auction.eligible.reduce<string | null>(
-			(best, id) => (bidTotal(game, id) > (best ? bidTotal(game, best) : 0) ? id : best),
-			null
+	// every bid on this talent, lowest first, so the highest is at the bottom. Of equal bids the one that wins the tie
+	// (eligible is in turn order from the first player) is lowest.
+	const history = $derived(
+		(auction.history ?? []).toSorted(
+			(a, b) => a.total - b.total || auction.eligible.indexOf(b.playerId) - auction.eligible.indexOf(a.playerId)
 		)
 	);
+
+	// the players who cannot bid (their people cap is reached), shown greyed out under the others
+	const capped = $derived(game.players.filter((p) => !auction.eligible.includes(p.id)));
 
 	// the first player in turn order who can bid
 	const tieWinner = $derived(getPlayer(game, auction.eligible[0]));
@@ -57,6 +62,12 @@
 				<span class="status" class:done={auction.done.includes(id)}>{auction.done.includes(id) ? '✔ done' : 'bidding…'}</span>
 			</li>
 		{/each}
+		{#each capped as player (player.id)}
+			<li class="capped" data-color={player.color}>
+				<span class="name">{fullName(game, player)}</span>
+				<span class="has">people cap reached</span>
+			</li>
+		{/each}
 	</ul>
 
 	{#if canBid && me}
@@ -67,13 +78,13 @@
 			}}
 		>
 			<label>
-				<input type="number" bind:value={amount} min={myBid} max={me.resources[resource]} />
+				<input type="number" bind:value={amount} min={myBid} max={me.resources[resource] + extra} />
 				{resource}
 			</label>
 			{#if usesCulture}
 				<span>+</span>
 				<label>
-					<input type="number" bind:value={culture} min={myCulture} max={me.resources.culture} />
+					<input type="number" bind:value={culture} min={myCulture} max={me.resources.culture + extra} />
 					culture
 				</label>
 			{/if}
@@ -86,17 +97,20 @@
 		<p class="note">Waiting for the others…</p>
 	{/if}
 
-	<p class="highest">
-		{#if highest}
-			{@const leader = getPlayer(game, highest)}
-			{@const total = bidTotal(game, highest)}
-			{@const parts = bidLabel(resource, auction.bids[highest], auction.cultureBids?.[highest] ?? 0)}
-			Highest bid: {total}{usesCulture && auction.cultureBids?.[highest] ? ` (${parts})` : ` ${resource}`} by
-			<span class="leader" data-color={leader.color}>{fullName(game, leader)}</span>
-		{:else}
-			No bids yet
-		{/if}
-	</p>
+	<!-- the bids under each other, the highest at the bottom -->
+	{#if history.length}
+		<ol class="bids" aria-label="Bids">
+			{#each history as bid, i (i)}
+				{@const bidder = getPlayer(game, bid.playerId)}
+				<li>
+					{bid.total}{usesCulture && bid.culture ? ` (${bidLabel(resource, bid.amount, bid.culture)})` : ` ${resource}`} by
+					<span class="leader" data-color={bidder.color}>{fullName(game, bidder)}</span>
+				</li>
+			{/each}
+		</ol>
+	{:else}
+		<p class="highest">No bids yet</p>
+	{/if}
 </dialog>
 
 <style>
@@ -162,6 +176,11 @@
 		color: var(--color-grayscale-5);
 	}
 
+	/* a player who cannot bid */
+	li.capped {
+		opacity: 0.5;
+	}
+
 	/* green like the Join button in the lobby */
 	.status.done {
 		color: var(--color-success);
@@ -176,6 +195,28 @@
 
 	.highest {
 		color: var(--color-grayscale-5);
+	}
+
+	/* the bid log: plain lines, not player rows */
+	.bids {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.1rem;
+		margin: 1rem 0 0;
+		padding: 0.3rem 0 0;
+
+		list-style: none;
+	}
+
+	.bids li {
+		display: block;
+		padding: 0;
+		text-align: center;
+
+		color: var(--color-grayscale-5);
+		background: none;
+		border: none;
 	}
 
 	.tie {

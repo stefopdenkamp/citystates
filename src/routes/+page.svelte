@@ -34,7 +34,7 @@
 	$effect(() => socket.close);
 
 	const canJoin = (game: LobbyGame) =>
-		game.gameStatus === 'saved' || (game.gameStatus === 'open' && game.playerCount < game.maxPlayerCount);
+		game.gameStatus === 'saved' || (game.gameStatus === 'open' && (game.playerCount < game.maxPlayerCount || game.botCount > 0));
 
 	const canDelete = (game: LobbyGame) => game.gameStatus !== 'inProgress' && game.connectedCount === 0;
 

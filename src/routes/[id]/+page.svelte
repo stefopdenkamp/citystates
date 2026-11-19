@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { connect } from '#lib/client/socket.ts';
 	import GameScreen from '#lib/components/GameScreen.svelte';
@@ -41,6 +42,8 @@
 			}
 		}
 		if (message.type === 'error') {
+			// The game could not be joined (finished, in progress, deleted): back to the lobby.
+			if (!gameState && !isPasswordRequired) goto(resolve('/'));
 			error = message.message;
 			setTimeout(() => (error = ''), 4000);
 		}

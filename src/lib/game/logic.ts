@@ -3,37 +3,37 @@ import {
 	units as unitStats,
 	agrarianReformPeopleCap,
 	cityCentreProduction,
+	palazzoCityCentreProduction,
+	tradecraftCap,
 	courtyardPeopleCap,
 	grainReservesPeopleCap,
 	cityStateProduction,
 	cityStateResource,
 	standardCap,
+	bots,
+	characteristicOptions,
 	colors,
-	cityStates,
 	gridSizeFor,
 	objectives as objectiveList,
-	personalityTraits,
 	regularPeopleInPool,
 	resourceTypes,
-	startingFarms,
+	wallRing,
 	talentResource,
 	talents,
 	talentsInPoolPerType,
-	titles,
 	maxTurnTimer,
 	policies as policyTree,
 	technologies as technologyTree,
 	technologyDiscount,
 	policyRemoveCost,
 	policySlots,
-	retrainCost,
-	indoctrinateCost,
+	reeducationCost,
+	frescoCost,
 	propagandaCost,
 	unitEffect,
 	taxGold,
 	bribeGold,
 	patronCultureWorth,
-	bishopDiscount,
 	philosopherTalents,
 	type Effect,
 	type BuildingStats,
@@ -41,13 +41,7 @@ import {
 	type ResourceType,
 	type Talent
 } from './config';
-import type { Characteristic, GameSettings, GameState, LegacyLine, Player, PublicGameState, PublicPlayer, Unit } from './types';
-
-const characteristicOptions: Record<Characteristic, string[]> = {
-	title: titles,
-	personalityTrait: personalityTraits,
-	cityState: cityStates
-};
+import type { Building, Characteristic, GameSettings, GameState, LegacyLine, Player, PoolItem, PublicGameState, PublicPlayer, Unit } from './types';
 
 const emptyResources = () =>
 	Object.fromEntries(resourceTypes.map((r) => [r, 0])) as Record<ResourceType, number>;
@@ -111,7 +105,7 @@ const playersFromStart = <T extends { id: string }>(state: { players: T[]; start
 
 type PlayerLike = Pick<Player, 'id' | 'people' | 'talents' | 'resources'>;
 
-// The army or spy on a cell, if any (games from before units have no units list).
+// The unit of a type on a cell, if any.
 export const unitAt = (state: GameState | PublicGameState, x: number, y: number, type: Unit['type']) =>
 	(state.units ?? []).find((u) => u.x === x && u.y === y && u.type === type);
 
@@ -124,29 +118,108 @@ const armyAt = (state: GameState | PublicGameState, x: number, y: number) =>
 export const faithUnitsAt = (state: GameState | PublicGameState, x: number, y: number) =>
 	(state.units ?? []).filter((u) => u.x === x && u.y === y && (u.type === 'missionary' || u.type === 'inquisitor'));
 
+// Whether you have a missionary or inquisitor on a cell.
+const hasFaithUnitOn = (state: GameState | PublicGameState, playerId: string, x: number, y: number) =>
+	faithUnitsAt(state, x, y).some((u) => u.ownerId === playerId);
+
+// Religious dominance over an opponent by their buildings: they have a building on all 8 cells inside their wall, and
+// you have a missionary or inquisitor on each.
+const isDominantByBuildings = (state: GameState | PublicGameState, playerId: string, targetId: string) => {
+	const inWall = state.buildings.filter((b) => b.ownerId === targetId && !isPeopleBuilding(b.type));
+	return inWall.length === (2 * wallRing + 1) ** 2 - 1 && inWall.every((b) => hasFaithUnitOn(state, playerId, b.x, b.y));
+};
+
+// Religious dominance over an opponent: your missionary or inquisitor on their city centre. It can only be put there
+// once you have one on all 8 of their buildings inside the wall (see unitTargets), and stays for good.
+export const hasReligiousDominance = (state: GameState | PublicGameState, playerId: string, targetId: string) => {
+	const { center } = getPlayer(state, targetId);
+	return hasFaithUnitOn(state, playerId, center.x, center.y);
+};
+
+// Over how many opponents you have religious dominance.
+export const religiousDominanceCount = (state: GameState | PublicGameState, playerId: string) =>
+	state.players.filter((p) => p.id !== playerId && hasReligiousDominance(state, playerId, p.id)).length;
+
+// The steps towards religious dominance over an opponent: 9, the 8 buildings inside their wall and their city centre.
+const dominanceSteps = (2 * wallRing + 1) ** 2;
+
+// How far you are: per opponent each of their buildings inside the wall with your missionary or inquisitor, and their
+// city centre; all 9 once you are on their city centre.
+export const religiousDominanceAmount = (state: GameState | PublicGameState, playerId: string) =>
+	state.players
+		.filter((p) => p.id !== playerId)
+		.reduce((sum, p) => {
+			if (hasReligiousDominance(state, playerId, p.id)) return sum + dominanceSteps;
+			const inWall = state.buildings.filter((b) => b.ownerId === p.id && !isPeopleBuilding(b.type));
+			return sum + inWall.filter((b) => hasFaithUnitOn(state, playerId, b.x, b.y)).length;
+		}, 0);
+
+export const religiousDominanceGoal = (state: GameState | PublicGameState) => dominanceSteps * (state.players.length - 1);
+
+// From 0 to 1, how far a player is towards religious dominance over all opponents.
+export const religiousDominanceProgress = (state: GameState | PublicGameState, playerId: string) => {
+	const goal = religiousDominanceGoal(state);
+	return goal ? religiousDominanceAmount(state, playerId) / goal : 0;
+};
+
+// The hover text of religious dominance: a line per player, e.g. "Anna converted 11 buildings and 1 city centre".
+// A city centre counts with all 8 buildings of that opponent, like the progress.
+export const religiousDominanceOverview = (state: GameState | PublicGameState) =>
+	state.players
+		.map((p) => {
+			const centres = religiousDominanceCount(state, p.id);
+			const buildings = religiousDominanceAmount(state, p.id) - centres;
+			const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+			return `${p.name} converted ${plural(buildings, 'building')} and ${plural(centres, 'city centre')}`;
+		})
+		.join('\n');
+
 export type OverviewLine = { source: string; amount: number };
 
 // The cap lines Tradecraft adds on top of the highest cap: your spies on opponents' buildings.
-const isSiphoned = (line: OverviewLine) => line.source === 'spy' && line.amount > 0;
+const isFromTradecraft = (line: OverviewLine) => line.source === 'spy' && line.amount > 0;
 
 type PlacedBuilding = GameState['buildings'][number];
 
-// What an opponent's spy takes away from the cap of the building's resource: 1, or with Covert operations in effect
-// the whole cap of that building. Your own spy on your own building (Counter intelligence) takes nothing.
-const spyTakes = (state: GameState | PublicGameState, b: PlacedBuilding) => {
+// An opponent's spy on a building: without Covert operations it lowers the cap of that resource by 1, with it the
+// building no longer counts for the cap (see resourceOverview). Your own spy on your own building (Counter
+// intelligence) does nothing.
+const spyOn = (state: GameState | PublicGameState, b: PlacedBuilding) => {
 	const spy = unitAt(state, b.x, b.y, 'spy');
 	if (!spy || spy.ownerId === b.ownerId) return null;
-	return { spy, amount: hasEffect(getPlayer(state, spy.ownerId), 'covertOperations') ? getBuildingStats(b.type).cap : 1 };
+	return { spy, isCovert: hasEffect(getPlayer(state, spy.ownerId), 'covertOperations') };
 };
 
+// Covert operations: the buildings with such a spy do not count for the cap, so it becomes the highest cap of the
+// others (0 when none are left). Shown as a line per spy, from the highest building down: how much lower the cap
+// gets without its building (nothing for a building below one that still counts).
+const covertSpyLines = (state: GameState | PublicGameState, playerId: string, resource: ResourceType) => {
+	const capOf = (b: PlacedBuilding) => getBuildingStats(b.type).cap;
+	let left = state.buildings.filter((b) => b.ownerId === playerId && getBuildingStats(b.type).resourceType === resource);
+	const spied = left.filter((b) => spyOn(state, b)?.isCovert).sort((a, b) => capOf(b) - capOf(a));
+	const lines: OverviewLine[] = [];
+	for (const b of spied) {
+		const before = Math.max(0, ...left.map(capOf));
+		left = left.filter((o) => o !== b);
+		const drop = before - Math.max(0, ...left.map(capOf));
+		if (drop) lines.push({ source: 'spy', amount: -drop });
+	}
+	return lines;
+};
+
+// What a player's city centre produces of its chosen resource: 1 with city centre production on, more with Grand
+// Palazzo (also when it is off), otherwise nothing.
+export const cityCentreAmount = (state: GameState | PublicGameState, player: EffectHolder) =>
+	hasEffect(player, 'grandPalazzo') ? palazzoCityCentreProduction : state.isCityCentreEnabled ? cityCentreProduction : 0;
+
 // What each opponent's missionary or inquisitor on a building blocks of its production, in the order they were
-// placed: 1 each until nothing is left, an inquisitor with Fervor in effect everything that is left.
+// placed: 1 each until nothing is left, an inquisitor with Pilgrimage everything that is left.
 const blockedBy = (state: GameState | PublicGameState, b: PlacedBuilding) => {
 	let left = getBuildingStats(b.type).production ?? 0;
 	return faithUnitsAt(state, b.x, b.y)
 		.filter((unit) => unit.ownerId !== b.ownerId)
 		.map((unit) => {
-			const isFervent = unit.type === 'inquisitor' && hasEffect(getPlayer(state, unit.ownerId), 'fervor');
+			const isFervent = unit.type === 'inquisitor' && hasEffect(getPlayer(state, unit.ownerId), 'pilgrimage');
 			const amount = Math.min(left, isFervent ? left : 1);
 			left -= amount;
 			return { unit, amount };
@@ -156,7 +229,7 @@ const blockedBy = (state: GameState | PublicGameState, b: PlacedBuilding) => {
 
 // Where a resource's production and cap come from, one line per source. The production lines add up; the cap
 // lines add up for people (farms and estates), otherwise the highest cap counts, lowered by the negative lines and
-// raised by Siphoning. Technologies and policies that change production or caps go here too, as extra lines.
+// raised by Tradecraft. Technologies and policies that change production or caps go here too, as extra lines.
 export const resourceOverview = (state: GameState | PublicGameState, playerId: string, resource: ResourceType | 'people') => {
 	const production: OverviewLine[] = [];
 	const cap: OverviewLine[] = resource === 'people' ? [] : [{ source: 'standard', amount: standardCap }];
@@ -164,11 +237,18 @@ export const resourceOverview = (state: GameState | PublicGameState, playerId: s
 	for (const b of state.buildings) {
 		const stats = getBuildingStats(b.type);
 		if (stats.resourceType !== resource) continue;
-		const spied = spyTakes(state, b);
+		const spied = spyOn(state, b);
 		if (b.ownerId !== playerId) {
-			// what your spies and missionaries take from an opponent's building, with Tradecraft and Tithes
-			if (spied?.spy.ownerId === playerId && hasEffect(player, 'siphoning')) cap.push({ source: 'spy', amount: spied.amount });
-			if (!hasEffect(player, 'devotion')) continue;
+			// with Tradecraft each of your spies on an opponent's building gives you 1 cap (whatever it takes from them)
+			if (spied?.spy.ownerId === playerId && hasEffect(player, 'tradecraft')) cap.push({ source: 'spy', amount: tradecraftCap });
+			// with Centralized logistics the cap your army blocks on an opponent's farm or estate is added to yours
+			const blocking = resource === 'people' ? armyAt(state, b.x, b.y) : undefined;
+			if (blocking?.ownerId === playerId && hasEffect(player, 'centralizedLogistics')) {
+				const extra = hasEffect(getPlayer(state, b.ownerId), 'agrarianReform') ? agrarianReformPeopleCap : 0;
+				cap.push({ source: blocking.type, amount: stats.cap + extra });
+			}
+			// with Tithes you get what your missionaries and inquisitors take
+			if (!hasEffect(player, 'tithes')) continue;
 			for (const { unit, amount } of blockedBy(state, b)) {
 				if (unit.ownerId === playerId) production.push({ source: unit.type, amount });
 			}
@@ -181,14 +261,14 @@ export const resourceOverview = (state: GameState | PublicGameState, playerId: s
 		// an army on a farm or estate blocks its cap (Agrarian reform's too), a spy on another building lowers the cap
 		const army = armyAt(state, b.x, b.y);
 		if (army && army.ownerId !== playerId) cap.push({ source: army.type, amount: -(stats.cap + extra) });
-		if (spied) cap.push({ source: 'spy', amount: -spied.amount });
+		if (spied && !spied.isCovert) cap.push({ source: 'spy', amount: -1 });
 		if (!stats.production) continue;
 		production.push({ source: b.type, amount: stats.production });
 		for (const { unit, amount } of blockedBy(state, b)) production.push({ source: unit.type, amount: -amount });
 	}
-	if (state.isCityCentreEnabled && resource !== 'people' && player.cityCentreResource === resource) {
-		production.push({ source: 'city centre', amount: cityCentreProduction });
-	}
+	if (resource !== 'people') cap.push(...covertSpyLines(state, playerId, resource));
+	const centre = cityCentreAmount(state, player);
+	if (centre && resource !== 'people' && player.cityCentreResource === resource) production.push({ source: 'city centre', amount: centre });
 	const cityState = player.characteristics.cityState;
 	if (state.enabledCharacteristics.cityState && cityStateResource[cityState] === resource) {
 		production.push({ source: cityState, amount: cityStateProduction });
@@ -196,12 +276,41 @@ export const resourceOverview = (state: GameState | PublicGameState, playerId: s
 	// Interest: +1 gold the first generation after unlocking it, +2 the next, etc.
 	const interest = resource === 'gold' ? generationsSince(state, player, 'interest') : 0;
 	if (interest) production.push({ source: 'Interest', amount: interest });
+	// Holy sacraments: 1 faith for each opponent's missionary and inquisitor on your buildings
+	if (resource === 'faith' && hasEffect(player, 'holySacraments')) {
+		for (const unit of state.units ?? []) {
+			const isOnYours = state.buildings.some((b) => b.x === unit.x && b.y === unit.y && b.ownerId === playerId);
+			if (isOnYours && unit.ownerId !== playerId && (unit.type === 'missionary' || unit.type === 'inquisitor')) production.push({ source: unit.type, amount: 1 });
+		}
+	}
+	// Bread and circuses: 1 people cap per upcoming generation from each opponent without an opera house to you
+	if (resource === 'people') {
+		const opponents = state.players.filter((p) => p.id !== playerId);
+		const unprotected = opponents.filter((p) => !hasOperaHouse(state, p.id)).length;
+		const own = breadAndCircusesCount(state, player);
+		if (own && unprotected) cap.push({ source: 'Bread and circuses', amount: own * unprotected });
+		if (!hasOperaHouse(state, playerId)) {
+			for (const opponent of opponents) {
+				const count = breadAndCircusesCount(state, opponent);
+				if (count) cap.push({ source: `Bread and circuses of ${opponent.name}`, amount: -count });
+			}
+		}
+	}
 	// Courtyard gardens: the city centre adds to the people cap, also when city centre production is off.
 	if (resource === 'people' && hasEffect(player, 'courtyardGardens')) cap.push({ source: 'Courtyard gardens', amount: courtyardPeopleCap });
 	// Grain reserves: a line that tops the people cap up to its lowest value
 	const shortfall = grainReservesPeopleCap - sum(cap);
 	if (resource === 'people' && hasEffect(player, 'grainReserves') && shortfall > 0) cap.push({ source: 'Grain reserves', amount: shortfall });
 	return { production, cap };
+};
+
+const hasOperaHouse = (state: GameState | PublicGameState, playerId: string) => state.buildings.some((b) => b.ownerId === playerId && b.type === 'opera house');
+
+// How many upcoming generations Bread and circuses has been in effect for the player (0 when it is not).
+const breadAndCircusesCount = (state: GameState | PublicGameState, player: Player | PublicPlayer) => {
+	const name = policyTree.flat().find((p) => p.effect === 'breadAndCircuses')!.name;
+	const since = hasEffect(player, 'breadAndCircuses') ? player.policyGenerations?.[name] : undefined;
+	return since === undefined ? 0 : state.stats.nrOfGenerations - since;
 };
 
 const sum = (lines: OverviewLine[]) => lines.reduce((total, line) => total + line.amount, 0);
@@ -216,8 +325,8 @@ export const peopleCount = (player: PlayerLike) => player.people + player.talent
 // What your own spies siphon off comes on top.
 export const resourceCap = (state: GameState | PublicGameState, playerId: string, resource: ResourceType) => {
 	const { cap } = resourceOverview(state, playerId, resource);
-	const highest = Math.max(...cap.filter((line) => line.amount > 0 && !isSiphoned(line)).map((line) => line.amount));
-	return Math.max(0, highest + sum(cap.filter((line) => line.amount < 0))) + sum(cap.filter(isSiphoned));
+	const highest = Math.max(...cap.filter((line) => line.amount > 0 && !isFromTradecraft(line)).map((line) => line.amount));
+	return Math.max(0, highest + sum(cap.filter((line) => line.amount < 0))) + sum(cap.filter(isFromTradecraft));
 };
 
 // What your buildings, and your city centre when enabled, produce of a resource each generation.
@@ -236,10 +345,10 @@ export const overviewText = (state: GameState | PublicGameState, playerId: strin
 	const isHighest = part === 'cap' && resource !== 'people';
 	const all = resourceOverview(state, playerId, resource)[part];
 	const highest = all
-		.filter((line) => !isSiphoned(line))
+		.filter((line) => !isFromTradecraft(line))
 		.reduce<OverviewLine | undefined>((max, line) => (!max || line.amount > max.amount ? line : max), undefined);
 	const lines = isHighest
-		? [...(highest ? [highest] : []), ...all.filter((line) => line.amount < 0 || isSiphoned(line))]
+		? [...(highest ? [highest] : []), ...all.filter((line) => line.amount < 0 || isFromTradecraft(line))]
 		: all;
 	const signed = (n: number) => (n < 0 ? `${n}` : `+${n}`);
 	const header =
@@ -285,7 +394,7 @@ export const peopleText = (player: PlayerLike) => {
 
 // Whether you may (re)choose your city centre's resource now: during your turn, once per turn.
 export const canSetCityCentre = (state: GameState | PublicGameState, playerId: string) =>
-	state.isCityCentreEnabled &&
+	cityCentreAmount(state, getPlayer(state, playerId)) > 0 &&
 	state.gameStatus === 'inProgress' &&
 	state.phase === 'action' &&
 	state.players[state.turnIndex]?.id === playerId &&
@@ -297,10 +406,22 @@ export const hasTitle = (state: GameState | PublicGameState, player: Pick<Player
 
 const isTalent = (type: string): type is Talent => (talents as readonly string[]).includes(type);
 
-// Works out which people and talents pay for a cost: specific talents first,
-// then generic people from regular people, then from talents: the chosen ones first, otherwise any.
-// A Philosopher (`substitutes`) may pay a specific talent with another one of its philosopherTalents group.
-const planPayment = (player: PlayerLike, cost: Cost[], chosenTalents: Talent[] = [], substitutes = false) => {
+// What changes how a cost is paid:
+// - substitutes: a Philosopher may pay a specific talent with another one of its philosopherTalents group
+// - workEthic: Work ethic, for a building: when the regular people cannot pay its people cost, 1 talent pays all of it
+// - centralization: Centralization, what you lack of a resource is paid with power
+export type PaymentRules = { substitutes?: boolean; workEthic?: boolean; centralization?: boolean };
+
+export const paymentRules = (state: GameState | PublicGameState, player: EffectHolder & Pick<Player, 'characteristics'>, isBuilding = false): PaymentRules => ({
+	substitutes: hasTitle(state, player, 'Philosopher'),
+	workEthic: isBuilding && hasEffect(player, 'workEthic'),
+	centralization: hasEffect(player, 'centralization')
+});
+
+// Works out which people, talents and resources pay for a cost: specific talents first, then generic people from
+// regular people, then from talents: the chosen ones first, otherwise any.
+const planPayment = (player: PlayerLike, cost: Cost[], chosenTalents: Talent[] = [], rules: PaymentRules = {}) => {
+	const { substitutes = false } = rules;
 	const talentsLeft = [...player.talents];
 	const spentTalents: Talent[] = [];
 	const required: Talent[] = [];
@@ -319,34 +440,62 @@ const planPayment = (player: PlayerLike, cost: Cost[], chosenTalents: Talent[] =
 			required.push(spentTalents.at(-1)!);
 		}
 	}
-	for (const { amount } of cost.filter((c) => c.resourceType === 'people')) {
-		for (let i = 0; i < amount; i++) {
+	const people = cost.filter((c) => c.resourceType === 'people').reduce((total, c) => total + c.amount, 0);
+	const payWithTalent = () => {
+		if (chosen.length) return take(chosen.shift()!);
+		if (!talentsLeft.length) return false;
+		spentTalents.push(talentsLeft.pop()!);
+		return true;
+	};
+	if (rules.workEthic && people > player.people) {
+		// Work ethic: 1 talent pays all of it, no regular people are spent
+		if (!payWithTalent()) return null;
+	} else {
+		for (let i = 0; i < people; i++) {
 			if (spentPeople < player.people) spentPeople++;
-			else if (chosen.length) {
-				if (!take(chosen.shift()!)) return null;
-			} else if (talentsLeft.length) spentTalents.push(talentsLeft.pop()!);
-			else return null;
+			else if (!payWithTalent()) return null;
 		}
 	}
-	for (const { amount, resourceType } of cost.filter((c) => (resourceTypes as readonly string[]).includes(c.resourceType))) {
-		if (player.resources[resourceType as ResourceType] < amount) return null;
+	// the resources: what you have, with Centralization what you lack in power (after power the cost asks for itself)
+	const left = { ...player.resources };
+	const spentResources = Object.fromEntries(resourceTypes.map((r) => [r, 0])) as Record<ResourceType, number>;
+	const resourceCosts = cost.filter((c) => (resourceTypes as readonly string[]).includes(c.resourceType));
+	for (const { amount, resourceType } of resourceCosts.toSorted((a, b) => Number(b.resourceType === 'power') - Number(a.resourceType === 'power'))) {
+		const resource = resourceType as ResourceType;
+		const own = Math.min(amount, left[resource]);
+		const lacking = amount - own;
+		if (lacking > 0 && (!rules.centralization || resource === 'power' || left.power < lacking)) return null;
+		left[resource] -= own;
+		spentResources[resource] += own;
+		left.power -= lacking;
+		spentResources.power += lacking;
 	}
-	return { spentPeople, spentTalents, required };
+	return { spentPeople, spentTalents, required, spentResources };
 };
 
-export const canAfford = (player: PlayerLike, cost: Cost[], substitutes = false) => planPayment(player, cost, [], substitutes) !== null;
+export const canAfford = (player: PlayerLike, cost: Cost[], rules: PaymentRules = {}) => planPayment(player, cost, [], rules) !== null;
 
-// In test mode everything that is paid with pay() is free.
-export const canPay = (state: GameState | PublicGameState, player: PlayerLike & Pick<Player, 'characteristics'>, cost: Cost[]) =>
-	!!state.isTestMode || canAfford(player, cost, hasTitle(state, player, 'Philosopher'));
+// Spending resources outside a purchase (bids, bribes, taxes, the culture actions): with Centralization power pays what
+// you lack. Test mode does not make these free.
+export const canSpend = (state: GameState | PublicGameState, player: PlayerLike & EffectHolder & Pick<Player, 'characteristics'>, cost: Cost[]) =>
+	canAfford(player, cost, paymentRules(state, player));
+
+const spend = (state: GameState, player: Player, cost: Cost[]) => {
+	const payment = planPayment(player, cost, [], paymentRules(state, player)) ?? fail(`That costs ${costLabel(cost)}`);
+	for (const resource of resourceTypes) player.resources[resource] -= payment.spentResources[resource];
+};
+
+// In test mode everything that is paid with pay() is free. isBuilding: Work ethic only works for buildings.
+export const canPay = (state: GameState | PublicGameState, player: PlayerLike & EffectHolder & Pick<Player, 'characteristics'>, cost: Cost[], isBuilding = false) =>
+	!!state.isTestMode || canAfford(player, cost, paymentRules(state, player, isBuilding));
 
 export const costLabel = (cost: Cost[]) =>
 	cost.map(({ amount, resourceType }) => `${amount} ${resourceType === 'people' && amount === 1 ? 'person' : resourceType}`).join(' · ');
 
 // Which talents a cost needs: `required` are fixed by the cost, `choices` is how many people have to be
 // paid with a talent the player picks from `options`. Null when no talents are involved or it is unaffordable.
-export const talentPayment = (player: PlayerLike, cost: Cost[], substitutes = false) => {
-	const payment = planPayment(player, cost, [], substitutes);
+export const talentPayment = (player: PlayerLike, cost: Cost[], rules: PaymentRules = {}) => {
+	const payment = planPayment(player, cost, [], rules);
 	if (!payment || payment.spentTalents.length === 0) return null;
 	const { required } = payment;
 	const options = [...player.talents];
@@ -362,62 +511,72 @@ const isPeopleBuilding = (type: string) => getBuildingStats(type).resourceType =
 const ringOf = (center: { x: number; y: number }, x: number, y: number) =>
 	Math.max(Math.abs(x - center.x), Math.abs(y - center.y));
 
-// Your buildings that a building of this type may replace: same resourceType, one level lower.
-const replaceableBuildings = (state: GameState | PublicGameState, playerId: string, type: string) => {
-	const stats = getBuildingStats(type);
-	return state.buildings.filter((b) => {
-		if (b.ownerId !== playerId) return false;
-		const other = getBuildingStats(b.type);
-		return other.resourceType === stats.resourceType && other.level === stats.level - 1;
-	});
+// The cells a building covers: a square of its size (farms 2×2, estates 3×3, the others 1 cell) from x, y, the
+// corner with the lowest x and y.
+export const buildingSize = (type: string) => getBuildingStats(type).size ?? 1;
+
+export const footprint = (x: number, y: number, size: number) =>
+	Array.from({ length: size * size }, (_, i) => ({ x: x + (i % size), y: y + Math.floor(i / size) }));
+
+const coveredCells = (buildings: Building[]) =>
+	buildings.flatMap((b) => footprint(b.x, b.y, buildingSize(b.type)).map((c) => cellKey(c.x, c.y)));
+
+// The buildings a building of this type placed at x, y replaces: inside the wall your one on its cell, outside it
+// the farms and estates it overlaps: your own, and with "Build over farms" also those of opponents.
+const canReplace = (state: GameState | PublicGameState, playerId: string, b: Building) =>
+	b.ownerId === playerId || (!!state.isBuildOverFarmsEnabled && isPeopleBuilding(b.type));
+
+export const replacedBuildings = (state: GameState | PublicGameState, playerId: string, type: string, x: number, y: number) => {
+	const cells = new Set(footprint(x, y, buildingSize(type)).map((c) => cellKey(c.x, c.y)));
+	return state.buildings.filter(
+		(b) => canReplace(state, playerId, b) && isPeopleBuilding(b.type) === isPeopleBuilding(type) && coveredCells([b]).some((c) => cells.has(c))
+	);
 };
 
-// With the building limit you can have only 1 building of each type; farms and estates are not limited.
-export const isAtBuildingLimit = (state: GameState | PublicGameState, playerId: string, type: string) =>
-	!!state.isBuildingLimitEnabled && !isPeopleBuilding(type) && state.buildings.some((b) => b.ownerId === playerId && b.type === type);
-
-// Gothic engineering: level 3 and 4 buildings can also be placed like a level 1 building.
-const isBuiltDirectly = (state: GameState | PublicGameState, playerId: string, type: string) =>
-	getBuildingStats(type).level >= 3 && hasEffect(getPlayer(state, playerId), 'gothicEngineering');
-
-// Whether an upgrade lacks your building one level lower to replace (Gothic engineering builds level 3 and 4 directly).
-export const needsLowerBuilding = (state: GameState | PublicGameState, playerId: string, type: string) =>
-	getBuildingStats(type).level > 1 && !isBuiltDirectly(state, playerId, type) && replaceableBuildings(state, playerId, type).length === 0;
-
-// Whether you have somewhere to put a building of this type (level 1 always has, upgrades need a lower building).
-export const hasPlaceFor = (state: GameState | PublicGameState, playerId: string, type: string) =>
-	!isAtBuildingLimit(state, playerId, type) &&
-	(getBuildingStats(type).level === 1 || isBuiltDirectly(state, playerId, type) || replaceableBuildings(state, playerId, type).length > 0);
-
-// Cells where a building of this type may be placed:
-// - level 2 to 4 replace your building of the same resourceType one level lower, so only those cells
-// - level 1 goes on a free cell next to (orthogonally or diagonally) your center or your other buildings, farms and estates do not count
-// - farms may also go 1 ring further: up to 2 rings from your center or your other buildings
-// - with Gothic engineering level 3 and 4 go on the cells of both
+// Where a building of this type may be placed, as the cell of its corner with the lowest x and y.
+// Inside the wall (the rings up to wallRing around your city centre) any building but F&E goes on any cell, also over
+// one of your buildings, which it replaces. F&E go outside every wall on cells without a city centre or another
+// player's building, also over your own F&E, which they replace, unless an opponent's army is on one of those. At
+// least one of their cells borders your wall (the ring just outside it) or shares a side with one of your F&E that
+// stays.
 export const validCells = (state: GameState | PublicGameState, playerId: string, type: string) => {
-	if (isAtBuildingLimit(state, playerId, type)) return new Set<string>();
-	const upgrades = replaceableBuildings(state, playerId, type).map((b) => cellKey(b.x, b.y));
-	if (getBuildingStats(type).level > 1 && !isBuiltDirectly(state, playerId, type)) return new Set(upgrades);
-	const occupied = new Set([
-		...state.buildings.map((b) => cellKey(b.x, b.y)),
-		...state.players.map((p) => cellKey(p.center.x, p.center.y))
-	]);
 	const { center } = getPlayer(state, playerId);
-	const anchors = state.buildings.filter((b) => b.ownerId === playerId && !isPeopleBuilding(b.type));
-	const cells = new Set<string>(upgrades);
-	const add = (x: number, y: number) => {
-		if (x < 0 || y < 0 || x >= state.gridSize || y >= state.gridSize) return;
-		if (!occupied.has(cellKey(x, y))) cells.add(cellKey(x, y));
-	};
-
-	const reach = isPeopleBuilding(type) ? 2 : 1;
-	for (const { x, y } of [center, ...anchors]) {
-		for (let dx = -reach; dx <= reach; dx++) {
-			for (let dy = -reach; dy <= reach; dy++) add(x + dx, y + dy);
+	const cells = new Set<string>();
+	if (!isPeopleBuilding(type)) {
+		for (const c of footprint(center.x - wallRing, center.y - wallRing, 2 * wallRing + 1)) {
+			if (ringOf(center, c.x, c.y) > 0) cells.add(cellKey(c.x, c.y));
+		}
+		return cells;
+	}
+	const ownFarmland = state.buildings.filter((b) => b.ownerId === playerId && isPeopleBuilding(b.type));
+	const others = state.buildings.filter((b) => !(isPeopleBuilding(b.type) && canReplace(state, playerId, b)));
+	const occupied = new Set([...coveredCells(others), ...state.players.map((p) => cellKey(p.center.x, p.center.y))]);
+	const fits = (c: { x: number; y: number }) =>
+		c.x >= 0 &&
+		c.y >= 0 &&
+		c.x < state.gridSize &&
+		c.y < state.gridSize &&
+		!occupied.has(cellKey(c.x, c.y)) &&
+		state.players.every((p) => ringOf(p.center, c.x, c.y) > wallRing);
+	const size = buildingSize(type);
+	for (let x = 0; x < state.gridSize; x++) {
+		for (let y = 0; y < state.gridSize; y++) {
+			const cover = footprint(x, y, size);
+			if (!cover.every(fits)) continue;
+			const replaced = replacedBuildings(state, playerId, type, x, y);
+			if (replaced.some((b) => (armyAt(state, b.x, b.y)?.ownerId ?? playerId) !== playerId)) continue;
+			const farmland = new Set(coveredCells(ownFarmland.filter((b) => !replaced.includes(b))));
+			const borders = (c: { x: number; y: number }) =>
+				ringOf(center, c.x, c.y) === wallRing + 1 ||
+				[[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => farmland.has(cellKey(c.x + dx, c.y + dy)));
+			if (cover.some(borders)) cells.add(cellKey(x, y));
 		}
 	}
 	return cells;
 };
+
+// Whether you have somewhere to put a building of this type.
+export const hasPlaceFor = (state: GameState | PublicGameState, playerId: string, type: string) => validCells(state, playerId, type).size > 0;
 
 // ---- lobby and start screen ----
 
@@ -445,8 +604,8 @@ export const createGameState = (settings: GameSettings, id: string, lobbyPasswor
 		objectives,
 		enabledCharacteristics: { ...settings.enabledCharacteristics },
 		isCityCentreEnabled: !!settings.isCityCentreEnabled,
+		isBuildOverFarmsEnabled: !!settings.isBuildOverFarmsEnabled,
 		isReligiousDominanceEnabled: !!settings.isReligiousDominanceEnabled,
-		isBuildingLimitEnabled: !!settings.isBuildingLimitEnabled,
 		isTestMode: !!settings.isTestMode,
 		isTutorialEnabled: !!settings.isTutorialEnabled,
 		gameStatus: 'open',
@@ -473,6 +632,9 @@ export const createGameState = (settings: GameSettings, id: string, lobbyPasswor
 
 export const addPlayer = (state: GameState): Player => {
 	if (state.gameStatus !== 'open') fail('This game has already started');
+	// a player who joins a full game takes the place of the last bot
+	const bot = state.players.findLast((p) => p.bot);
+	if (state.players.length >= state.maxPlayerCount && bot) state.players = state.players.filter((p) => p !== bot);
 	if (state.players.length >= state.maxPlayerCount) fail('This game is full');
 	// a free default name ("Player 1", "Player 2", ...), a random free color and a random choice in each enabled
 	// characteristic dropdown
@@ -514,6 +676,26 @@ export const addPlayer = (state: GameState): Player => {
 	return player;
 };
 
+// A bot in an empty place of an open game, with a random free color and characteristics, always connected and ready.
+export const addBot = (state: GameState, bot: string) => {
+	if (!bots.includes(bot)) fail('Unknown bot');
+	if (state.players.length >= state.maxPlayerCount) fail('This game is full');
+	const player = addPlayer(state);
+	let number = 1;
+	const nameFor = (n: number) => (n === 1 ? bot : `${bot} ${n}`);
+	while (state.players.some((p) => p.name === nameFor(number))) number++;
+	player.name = nameFor(number);
+	player.bot = bot;
+	player.isReadyForGame = true;
+	return player;
+};
+
+export const removeBot = (state: GameState, playerId: string) => {
+	if (state.gameStatus !== 'open') fail('Players can only be changed before the game starts');
+	if (!getPlayer(state, playerId).bot) fail('That is not a bot');
+	state.players = state.players.filter((p) => p.id !== playerId);
+};
+
 export const updatePlayer = (
 	state: GameState,
 	playerId: string,
@@ -551,9 +733,11 @@ export const setReady = (state: GameState, playerId: string, ready: boolean) => 
 	player.isReadyForGame = ready;
 };
 
+// A test game ignores the minimum player count.
 export const canStart = (state: GameState | PublicGameState) =>
 	state.gameStatus === 'open' &&
-	state.players.length >= state.minPlayerCount &&
+	state.players.length >= (state.isTestMode ? 1 : state.minPlayerCount) &&
+	state.players.some((p) => !p.bot) &&
 	state.players.every((p) => p.isReadyForGame);
 
 // ---- connections and saving ----
@@ -625,18 +809,30 @@ export const startGame = (state: GameState) => {
 			player.unlockedPolicies = policyTree.flat().map((p) => p.name);
 		}
 	}
-	// The starting farms go on random cells in the second ring around the center.
+	// A Bishop starts with Zealots unlocked and in effect.
+	for (const player of state.players.filter((p) => hasTitle(state, p, 'Bishop'))) {
+		player.unlockedPolicies = [...new Set([...(player.unlockedPolicies ?? []), 'Zealots'])];
+		player.policiesInEffect = ['Zealots', null, null];
+	}
+	// The 2 starting farms go on opposite sides of the wall, each touching it with 2 cells, staggered: one is shifted
+	// a cell along the wall from the other. A random layout of those that fit on the board.
 	for (const player of state.isTestMode ? [] : state.players) {
-		const ringTwo = shuffle(
-			[...validCells(state, player.id, 'farm')].filter((cell) => {
-				const [x, y] = cell.split(',').map(Number);
-				return ringOf(player.center, x, y) === 2;
-			})
+		const { x: cx, y: cy } = player.center;
+		const near = -wallRing - buildingSize('farm');
+		const far = wallRing + 1;
+		const layouts = [-wallRing, -wallRing + 1].flatMap((a) => {
+			const b = -2 * wallRing + 1 - a;
+			return [
+				[{ x: cx + a, y: cy + near }, { x: cx + b, y: cy + far }],
+				[{ x: cx + near, y: cy + a }, { x: cx + far, y: cy + b }]
+			];
+		});
+		const free = validCells(state, player.id, 'farm');
+		const fits = layouts.filter((farms) =>
+			farms.every(({ x, y }) => free.has(`${x},${y}`) && replacedBuildings(state, player.id, 'farm', x, y).length === 0)
 		);
-		for (const cell of ringTwo.slice(0, startingFarms)) {
-			const [x, y] = cell.split(',').map(Number);
-			state.buildings.push({ id: crypto.randomUUID(), type: 'farm', ownerId: player.id, x, y });
-		}
+		const [farms] = shuffle(fits);
+		for (const { x, y } of farms) state.buildings.push({ id: crypto.randomUUID(), type: 'farm', ownerId: player.id, x, y });
 	}
 	addLog(state, `The game has started. Turn order: ${state.players.map(playerTag).join(', ')}`);
 	beginGeneration(state);
@@ -645,7 +841,7 @@ export const startGame = (state: GameState) => {
 // ---- phase one: a new generation is born ----
 
 const drawFromPool = (state: GameState, count: number) => {
-	const drawn = [];
+	const drawn: PoolItem[] = [];
 	for (let i = 0; i < count && state.peoplePool.length; i++) {
 		const index = Math.floor(Math.random() * state.peoplePool.length);
 		drawn.push(...state.peoplePool.splice(index, 1));
@@ -680,7 +876,12 @@ export const beginGeneration = (state: GameState) => {
 	);
 	const drawn = drawFromPool(state, Object.values(deficits).reduce((a, b) => a + b, 0));
 	const drawnTalents = drawn.filter((d): d is Talent => d !== 'person');
-	state.lastBorn = { people: drawn.length, talents: drawnTalents.length };
+	state.lastBorn = {
+		people: drawn.length,
+		talents: drawnTalents.length,
+		drawn,
+		deficits
+	};
 	state.auction = {
 		queue: drawnTalents,
 		talent: null,
@@ -696,9 +897,10 @@ export const beginGeneration = (state: GameState) => {
 		state,
 		`Generation ${state.stats.nrOfGenerations}: ${bornMessage(drawn.length, drawnTalents.length)}`
 	);
+	collectTaxes(state);
 };
 
-// Called when the 'A new generation is born' title has been shown.
+// Called right after the generation is born (by a timer on the server, see bornPhaseMs).
 export const finishBorn = (state: GameState, now: number) => {
 	if (state.phase !== 'born' || !state.auction) return;
 	nextAuction(state, now);
@@ -724,6 +926,7 @@ const nextAuction = (state: GameState, now: number) => {
 		auction.eligible = eligible;
 		auction.bids = Object.fromEntries(eligible.map((id) => [id, 0]));
 		auction.cultureBids = Object.fromEntries(eligible.map((id) => [id, 0]));
+		auction.history = [];
 		auction.done = [];
 		state.phase = 'auction';
 		return;
@@ -749,11 +952,15 @@ export const bidTotal = (state: GameState | PublicGameState, playerId: string) =
 export const bidLabel = (resource: ResourceType, amount: number, culture: number) =>
 	[amount && `${amount} ${resource}`, culture && `${culture} culture`].filter(Boolean).join(' and ');
 
+const bidCost = (resource: ResourceType, amount: number, culture: number): Cost[] => [
+	{ amount, resourceType: resource },
+	{ amount: culture, resourceType: 'culture' }
+];
+
 const awardTalent = (state: GameState, playerId: string, talent: Talent, bid: number, culture: number) => {
 	const player = getPlayer(state, playerId);
 	const resource = talentResource[talent];
-	player.resources[resource] -= bid;
-	player.resources.culture -= culture;
+	spend(state, player, bidCost(resource, bid, culture));
 	player.talents.push(talent);
 	state.auction!.won[playerId]++;
 	const paid = bidLabel(resource, bid, culture);
@@ -773,9 +980,10 @@ export const placeBid = (state: GameState, playerId: string, amount: number, cul
 	if (!Number.isInteger(amount) || !Number.isInteger(culture)) fail('Bids are whole numbers');
 	if (amount < auction!.bids[playerId] || culture < previousCulture) fail('You cannot lower your bid');
 	const player = getPlayer(state, playerId);
-	if (amount > player.resources[resource] || culture > player.resources.culture) fail('You do not have enough to bid that');
+	if (!canSpend(state, player, bidCost(resource, amount, culture))) fail('You do not have enough to bid that');
 	auction!.bids[playerId] = amount;
 	auction!.cultureBids = { ...auction!.cultureBids, [playerId]: culture };
+	auction!.history = [...(auction!.history ?? []), { playerId, amount, culture, total: bidTotal(state, playerId) }];
 };
 
 export const doneBidding = (state: GameState, playerId: string, now: number) => {
@@ -824,28 +1032,31 @@ const assertTurn = (state: GameState, playerId: string) => {
 	if (state.phase !== 'action' || state.players[state.turnIndex]?.id !== playerId) fail('It is not your turn');
 };
 
-// Pays a cost: people and talents go back to the pool, resources are spent. Nothing is paid in test mode.
-const pay = (state: GameState, player: Player, cost: Cost[], chosenTalents: Talent[], what: string) => {
+// Pays a purchase: people and talents go back to the pool, resources are spent. Nothing is paid in test mode.
+const pay = (state: GameState, player: Player, cost: Cost[], chosenTalents: Talent[], what: string, isBuilding = false) => {
 	if (state.isTestMode) return;
-	const payment = planPayment(player, cost, chosenTalents, hasTitle(state, player, 'Philosopher')) ?? fail(`You cannot afford a ${what}`);
+	const payment = planPayment(player, cost, chosenTalents, paymentRules(state, player, isBuilding)) ?? fail(`You cannot afford a ${what}`);
 	player.people -= payment.spentPeople;
 	for (let i = 0; i < payment.spentPeople; i++) state.peoplePool.push('person');
 	for (const talent of payment.spentTalents) {
 		player.talents.splice(player.talents.indexOf(talent), 1);
 		state.peoplePool.push(talent);
 	}
-	for (const { amount, resourceType } of cost) {
-		if ((resourceTypes as readonly string[]).includes(resourceType)) player.resources[resourceType as ResourceType] -= amount;
-	}
+	for (const resource of resourceTypes) player.resources[resource] -= payment.spentResources[resource];
 };
 
 export const getUnitStats = (type: string) => unitStats.find((u) => u.name === type) ?? fail(`Unknown unit ${type}`);
 
-// What a unit costs you: a Bishop's missionaries cost less faith.
-export const unitCost = (state: GameState | PublicGameState, player: Pick<Player, 'characteristics'>, type: string): Cost[] =>
-	getUnitStats(type).cost.map((c) =>
-		type === 'missionary' && c.resourceType === 'faith' && hasTitle(state, player, 'Bishop') ? { ...c, amount: Math.max(0, c.amount - bishopDiscount) } : c
-	);
+// What a unit costs you: with Zealots a missionary costs 1 person and 1 faith, with War machine an army 1 person and
+// 1 materials.
+export const unitCost = (state: GameState | PublicGameState, player: EffectHolder, type: string): Cost[] => {
+	if (type === 'missionary' && hasEffect(player, 'zealots')) return [{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'faith' }];
+	if (type === 'army' && hasEffect(player, 'warMachine')) return [{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'materials' }];
+	return getUnitStats(type).cost;
+};
+
+// The picture of a building or unit in static/images/pieces as a CSS url, e.g. "scribe's chamber" -> scribes-chamber.jpg
+export const pieceImage = (name: string) => `url('/games/citystates/images/pieces/${name.replace(/'/g, '').replace(/\s+/g, '-')}.jpg')`;
 
 // The name of a unit's picture in static/images/pieces (a mercenary looks like an army).
 export const unitImage = (type: string) => getUnitStats(type).image ?? type;
@@ -859,32 +1070,35 @@ export const unitImage = (type: string) => getUnitStats(type).image ?? type;
 //   your own, and also on your own building) and itself; otherwise it stays and blocks like a missionary.
 // - With Persecution in effect your inquisitor also goes on your own building, stays there and keeps other
 //   missionaries and inquisitors out.
-// - A trader goes on an opponent's city centre, to trade with them (see trade).
-// - Using a spy, trader, missionary or inquisitor on a player with Tax reformation in effect costs 1 gold.
+// - A trader goes on no cell but on an opponent's player board (see traderTargets).
 // - A Dictator's buildings are no target for opponents' missionaries, nor for their spies without Covert operations.
 export const unitTargets = (state: GameState | PublicGameState, playerId: string, type: Unit['type']) => {
 	const player = getPlayer(state, playerId);
-	const canPayTax = (target: Pick<Player, 'id' | 'unlockedTechnologies'>) => isArmy(type) || !isTaxed(player, target) || player.resources.gold >= taxGold;
-	if (type === 'trader') {
-		if (hasEffect(player, 'isolationism')) return new Set<string>();
-		return new Set(
-			state.players
-				.filter((p) => p.id !== playerId && !hasEffect(p, 'isolationism') && canPayTax(p))
-				.map((p) => cellKey(p.center.x, p.center.y))
-		);
-	}
-	return new Set(
-		state.buildings
+	if (type === 'trader') return new Set<string>(); // a trader goes on a player board, see traderTargets
+	// religious dominance: with your missionary or inquisitor on all 8 buildings inside an opponent's wall, one goes on
+	// their city centre (one per player), where it stays for good
+	const centres =
+		state.isReligiousDominanceEnabled && (type === 'missionary' || type === 'inquisitor')
+			? state.players
+					.filter((p) => p !== player && !(type === 'missionary' && (hasTitle(state, p, 'Dictator') || hasEffect(p, 'freedomOfSpeech'))))
+					.filter((p) => isDominantByBuildings(state, playerId, p.id) && !hasFaithUnitOn(state, playerId, p.center.x, p.center.y))
+					.map((p) => cellKey(p.center.x, p.center.y))
+			: [];
+	return new Set([
+		...centres,
+		...state.buildings
 			.filter((b) => isPeopleBuilding(b.type) === isArmy(type))
 			.filter((b) => {
 				const owner = getPlayer(state, b.ownerId);
 				const isOwn = owner === player;
-				if (!canPayTax(owner)) return false;
 				const isDictatorProof = type === 'missionary' || (type === 'spy' && !hasEffect(player, 'covertOperations'));
 				if (!isOwn && isDictatorProof && hasTitle(state, owner, 'Dictator')) return false;
+				// Freedom of speech: no new missionaries of opponents (those already there stay, inquisitors still come)
+				if (!isOwn && type === 'missionary' && hasEffect(owner, 'freedomOfSpeech')) return false;
 				if (isArmy(type) || type === 'spy') {
 					const unit = type === 'spy' ? unitAt(state, b.x, b.y, 'spy') : armyAt(state, b.x, b.y);
-					if (!unit) return !isOwn || (type === 'spy' && hasEffect(player, 'counterIntelligence'));
+					// on your own building only a spy with Counter intelligence, or an army with Defensive strategies
+					if (!unit) return !isOwn || (type === 'spy' ? hasEffect(player, 'counterIntelligence') : hasEffect(player, 'defensiveStrategies'));
 					const isGuarded = type === 'spy' && unit.ownerId === owner.id && hasEffect(owner, 'counterIntelligence');
 					return unit.ownerId !== playerId && !isGuarded;
 				}
@@ -896,18 +1110,29 @@ export const unitTargets = (state: GameState | PublicGameState, playerId: string
 				return inquisitor?.ownerId !== playerId && !isGuarded;
 			})
 			.map((b) => cellKey(b.x, b.y))
-	);
+	]);
 };
 
 // A bought unit waits in your stock until you place it.
 export const buyUnit = (state: GameState, playerId: string, type: Unit['type'], chosenTalents: Talent[] = []) => {
 	assertTurn(state, playerId);
-	if (!getUnitStats(type).description) fail('That unit cannot be used yet');
 	const player = getPlayer(state, playerId);
-	if (!isUnitUnlocked(player, type)) fail(`You need a technology or policy to buy a ${type}`);
+	if (!isUnitUnlocked(state, player, type)) fail(`You need ${unitUnlockText(type)} to buy a ${type}`);
 	pay(state, player, unitCost(state, player, type), chosenTalents, type);
 	player.undeployedUnits = [...(player.undeployedUnits ?? []), type];
 	addLog(state, `${playerTag(player)} buys a ${type}`);
+};
+
+// The opponents whose player board a trader can go on, to trade with them (see trade). Not with Isolationism (yours
+// or theirs).
+export const traderTargets = (state: GameState | PublicGameState, playerId: string) => {
+	const player = getPlayer(state, playerId);
+	if (hasEffect(player, 'isolationism')) return new Set<string>();
+	return new Set(
+		state.players
+			.filter((p) => p.id !== playerId && !hasEffect(p, 'isolationism'))
+			.map((p) => p.id)
+	);
 };
 
 // Placing a unit from your stock on units it removes (see unitTargets) removes them and itself.
@@ -921,17 +1146,22 @@ export const deployUnit = (state: GameState, playerId: string, type: Unit['type'
 	stock.splice(stock.indexOf(type), 1);
 	player.undeployedUnits = stock;
 
+	state.units ??= [];
+	const centreOwner = state.players.find((p) => p.center.x === x && p.center.y === y);
+	if (centreOwner) {
+		state.units.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
+		addLog(state, `${playerTag(player)} places a ${type} on ${playerTag(centreOwner)}'s city centre and has religious dominance over them for good`);
+		return;
+	}
 	const building = state.buildings.find((b) => b.x === x && b.y === y)!;
 	const target = getPlayer(state, building.ownerId);
 	const existing = isArmy(type) ? armyAt(state, x, y) : type === 'spy' ? unitAt(state, x, y, type) : undefined;
 	const faithUnits = type === 'inquisitor' ? faithUnitsAt(state, x, y) : [];
-	if (!isArmy(type)) payTax(state, player, target);
-	state.units ??= [];
 	if (existing) {
 		state.units = state.units.filter((u) => u !== existing);
 		const other = getPlayer(state, existing.ownerId);
-		// a General's army stays to defend
-		if (isArmy(type) && hasTitle(state, player, 'General')) {
+		// a General's army stays to defend their own farm or estate
+		if (isArmy(type) && hasTitle(state, player, 'General') && target === player) {
 			state.units.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
 			addLog(state, `${playerTag(player)}'s ${type} removes ${playerTag(other)}'s ${existing.type} from ${playerTag(target)}'s ${building.type} and stays`);
 		} else {
@@ -983,8 +1213,6 @@ export const trade = (state: GameState, playerId: string, targetId: string, give
 	if (!Number.isInteger(count) || count < 1 || count > maxTraders(player) || take.length !== count * ratio.take || !isValid) {
 		fail(`Each trader trades ${ratio.give} of your resources for ${ratio.take} of theirs`);
 	}
-	const tax = isTaxed(player, target) ? taxGold * count : 0;
-	if (tax && player.resources.gold < tax + give.filter((r) => r === 'gold').length) fail(`${target.name} has strict taxes, that costs ${tax} gold more`);
 	if (give.some((r) => player.resources[r] < give.filter((g) => g === r).length)) fail('You do not have those resources');
 	if (take.some((r) => target.resources[r] < take.filter((g) => g === r).length)) fail(`${target.name} does not have those resources`);
 
@@ -1004,7 +1232,6 @@ export const trade = (state: GameState, playerId: string, targetId: string, give
 	const counted = (resources: ResourceType[]) =>
 		[...new Set(resources)].map((r) => `${resources.filter((x) => x === r).length} ${r}`).join(' and ');
 	addLog(state, `${playerTag(player)} trades ${counted(give)} for ${counted(take)}`);
-	for (let i = 0; i < count; i++) payTax(state, player, target);
 };
 
 export const build = (state: GameState, playerId: string, type: string, x: number, y: number, chosenTalents: Talent[] = []) => {
@@ -1012,22 +1239,28 @@ export const build = (state: GameState, playerId: string, type: string, x: numbe
 	const stats: BuildingStats = getBuildingStats(type);
 	const player = getPlayer(state, playerId);
 	if (!validCells(state, playerId, type).has(cellKey(x, y))) fail('You cannot build there');
-	pay(state, player, stats.cost, chosenTalents, type);
-	// An upgrade replaces the building on that cell.
-	const replaced = state.buildings.find((b) => b.x === x && b.y === y);
-	state.buildings = state.buildings.filter((b) => b !== replaced);
+	pay(state, player, stats.cost, chosenTalents, type, true);
+	// Inside the wall a building replaces the one on its cell, and units on it stay. Outside it F&E replace the F&E
+	// they overlap (never with an opponent's army on it), and your armies on those go back to your stock.
+	const replaced = replacedBuildings(state, playerId, type, x, y);
+	state.buildings = state.buildings.filter((b) => !replaced.includes(b));
+	if (isPeopleBuilding(type)) {
+		for (const b of replaced) {
+			for (const unit of (state.units ?? []).filter((u) => u.x === b.x && u.y === b.y)) {
+				const owner = getPlayer(state, unit.ownerId);
+				owner.undeployedUnits = [...(owner.undeployedUnits ?? []), unit.type];
+				state.units = state.units!.filter((u) => u !== unit);
+			}
+		}
+	}
 	state.buildings.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
-	addLog(
-		state,
-		replaced
-			? `${playerTag(player)} replaces a ${replaced.type} with a ${type}`
-			: `${playerTag(player)} builds a ${type}`
-	);
+	const whose = (b: Building) => (b.ownerId === playerId ? 'the' : `${playerTag(getPlayer(state, b.ownerId))}'s`);
+	addLog(state, `${playerTag(player)} builds a ${type}${replaced.length ? ` over ${replaced.map((b) => `${whose(b)} ${b.type}`).join(' and ')}` : ''}`);
 };
 
 export const setCityCentre = (state: GameState, playerId: string, resource: ResourceType) => {
 	assertTurn(state, playerId);
-	if (!state.isCityCentreEnabled) fail('The city centre is not enabled in this game');
+	if (!cityCentreAmount(state, getPlayer(state, playerId))) fail('Your city centre produces nothing');
 	if (!(resourceTypes as readonly string[]).includes(resource)) fail('Unknown resource');
 	if (!canSetCityCentre(state, playerId)) fail('You can change your city centre once each turn');
 	const player = getPlayer(state, playerId);
@@ -1084,7 +1317,6 @@ export const readyForNextGeneration = (state: GameState, playerId: string) => {
 
 // ---- objectives ----
 
-// What a player has towards an objective, e.g. 6 levels of the 8. Objectives that are not tracked yet stay at 0.
 // The sum of the 2 highest levels.
 const twoHighest = (levels: number[]) =>
 	levels
@@ -1092,23 +1324,24 @@ const twoHighest = (levels: number[]) =>
 		.slice(0, 2)
 		.reduce((sum, level) => sum + level, 0);
 
-// The level of a technology or policy is its row in its column, starting at 1.
 // The policies in a player's slots, without the empty ones.
 const policiesIn = (player: Pick<Player, 'policiesInEffect'>) => (player.policiesInEffect ?? []).filter((p) => p !== null);
 
+// The level of a technology is its row in its column, starting at 1.
 const levelsIn = (tree: { name: string }[][], names: string[]) =>
 	names.map((name) => tree.find((c) => c.some((t) => t.name === name))?.findIndex((t) => t.name === name) ?? -1).map((i) => i + 1);
 
-const objectiveAmount = (state: GameState | PublicGameState, playerId: string, objective: number) => {
+// What a player has towards an objective, e.g. 6 levels of the 8.
+export const objectiveAmount = (state: GameState | PublicGameState, playerId: string, objective: number) => {
 	const player = getPlayer(state, playerId);
 	const stock = player.undeployedUnits ?? [];
 	const amounts = [
-		// the 2 highest levels of your buildings, F&E do not count
+		// the highest level of each resource, of the 2 best resources (so 2 different level 4 buildings); F&E do not count
 		() =>
 			twoHighest(
-				state.buildings
-					.filter((b) => b.ownerId === playerId && getBuildingStats(b.type).resourceType !== 'people')
-					.map((b) => getBuildingStats(b.type).level)
+				resourceTypes.map((resource) =>
+					Math.max(0, ...state.buildings.filter((b) => b.ownerId === playerId && getBuildingStats(b.type).resourceType === resource).map((b) => getBuildingStats(b.type).level))
+				)
 			),
 		() => peopleCount(player),
 		// mercenaries do not count
@@ -1116,9 +1349,9 @@ const objectiveAmount = (state: GameState | PublicGameState, playerId: string, o
 		() => player.tradeGain ?? 0,
 		() => (state.units ?? []).filter((u) => u.ownerId === playerId && u.type === 'inquisitor').length,
 		() => new Set(player.talents).size,
-		// a column is unlocked from the top down, so only its highest technology counts
-		() => twoHighest(technologyTree.map((column) => Math.max(0, ...levelsIn([column], player.unlockedTechnologies ?? [])))),
-		() => twoHighest(levelsIn(policyTree, policiesIn(player)))
+		// the highest level of your technologies
+		() => Math.max(0, ...levelsIn(technologyTree, player.unlockedTechnologies ?? [])),
+		() => (policiesIn(player).includes('Centralization') ? 1 : 0)
 	];
 	return amounts[objective]?.() ?? 0;
 };
@@ -1135,17 +1368,23 @@ export const objectiveOverview = (state: GameState | PublicGameState, objective:
 		.join('\n');
 };
 
-// Checked at the end of phase two: the game ends once a player has completed all objectives. When several
-// players have, it is a draw between them.
+// Checked at the end of phase two: the game ends once a player has completed all objectives, or (when enabled) has
+// religious dominance over all opponents. When several players have, it is a draw between them.
+const isReligiouslyDominant = (state: GameState, playerId: string) =>
+	state.isReligiousDominanceEnabled && state.players.length > 1 && religiousDominanceCount(state, playerId) === state.players.length - 1;
+
 export const checkObjectives = (state: GameState) => {
-	const winners = state.players.filter((p) => state.objectives.every((o) => objectiveProgress(state, p.id, o) >= 1));
+	const winners = state.players.filter(
+		(p) => state.objectives.every((o) => objectiveProgress(state, p.id, o) >= 1) || isReligiouslyDominant(state, p.id)
+	);
 	if (!winners.length) return false;
 	state.gameStatus = 'finished';
 	state.winnerIds = winners.map((p) => p.id);
 	state.turnEndsAt = null;
 	for (const player of state.players) player.isTurn = false;
 	const names = winners.map(playerTag).join(' and ');
-	addLog(state, winners.length > 1 ? `A draw: ${names} have completed all objectives` : `${names} has completed all objectives and wins the game`);
+	const how = winners.every((p) => isReligiouslyDominant(state, p.id)) ? 'religious dominance over all players' : 'completed all objectives';
+	addLog(state, winners.length > 1 ? `A draw: ${names} have ${how}` : `${names} has ${how} and wins the game`);
 	return true;
 };
 
@@ -1156,14 +1395,16 @@ type EffectHolder = Pick<Player, 'unlockedTechnologies' | 'policiesInEffect'>;
 export const getTechnology = (name: string) =>
 	technologyTree.flat().find((t) => t.name === name) ?? fail(`Unknown technology ${name}`);
 
-// The policies that work so far (while in effect); the others do nothing yet.
-const workingPolicyEffects: Effect[] = ['mercenaries', 'courtyardGardens', 'grainReserves', 'agrarianReform'];
+// Without city centre production you first have to choose what the city centre produces with Grand Palazzo.
+export const technologyDescription = (state: GameState | PublicGameState, technology: { description: string; effect?: string }) =>
+	technology.effect === 'grandPalazzo' && !state.isCityCentreEnabled
+		? `Click on your city centre to choose a resource: it produces ${palazzoCityCentreProduction} of it each generation`
+		: technology.description;
 
-// Whether the player has unlocked a technology with this effect, or has a working policy with it in effect.
+// Whether the player has unlocked a technology with this effect, or has a policy with it in effect.
 export const hasEffect = (player: EffectHolder, effect: Effect) =>
 	(player.unlockedTechnologies ?? []).some((name) => technologyTree.flat().find((t) => t.name === name)?.effect === effect) ||
-	(workingPolicyEffects.includes(effect) &&
-		(player.policiesInEffect ?? []).some((name) => policyTree.flat().find((p) => p.name === name)?.effect === effect));
+	(player.policiesInEffect ?? []).some((name) => policyTree.flat().find((p) => p.name === name)?.effect === effect);
 
 // How many generations have started since the player unlocked the technology with this effect (0 when not unlocked).
 const generationsSince = (state: GameState | PublicGameState, player: Player | PublicPlayer, effect: Effect) => {
@@ -1173,14 +1414,16 @@ const generationsSince = (state: GameState | PublicGameState, player: Player | P
 };
 
 // A technology's cost for you: its knowledge is 1 lower for each opponent who has already unlocked it.
+// With Espionage it costs no knowledge once an opponent has it.
 export const technologyCost = (state: GameState | PublicGameState, playerId: string, name: string): Cost[] => {
 	const others = state.players.filter((p) => p.id !== playerId && (p.unlockedTechnologies ?? []).includes(name)).length;
+	const isSpiedOn = others > 0 && hasEffect(getPlayer(state, playerId), 'espionage');
 	return getTechnology(name).cost.map((c) =>
-		c.resourceType === 'knowledge' ? { ...c, amount: Math.max(0, c.amount - others * technologyDiscount) } : c
+		c.resourceType === 'knowledge' ? { ...c, amount: isSpiedOn ? 0 : Math.max(0, c.amount - others * technologyDiscount) } : c
 	);
 };
 
-// A column is unlocked from the bottom up: a technology needs the one below it first.
+// A column is unlocked from the top down: a technology needs the one above it first.
 export const isNextTechnology = (player: EffectHolder, name: string) => {
 	const column = technologyTree.find((c) => c.some((t) => t.name === name)) ?? fail(`Unknown technology ${name}`);
 	const index = column.findIndex((t) => t.name === name);
@@ -1192,32 +1435,62 @@ export const unlockTechnology = (state: GameState, playerId: string, name: strin
 	assertTurn(state, playerId);
 	const player = getPlayer(state, playerId);
 	if ((player.unlockedTechnologies ?? []).includes(name)) fail('You already have that technology');
-	if (!isNextTechnology(player, name)) fail('Unlock the technology below it first');
+	if (!isNextTechnology(player, name)) fail('Unlock the technology above it first');
 	pay(state, player, technologyCost(state, playerId, name), [], name);
 	player.unlockedTechnologies = [...(player.unlockedTechnologies ?? []), name];
 	player.technologyGenerations = { ...player.technologyGenerations, [name]: state.stats.nrOfGenerations };
 	addLog(state, `${playerTag(player)} unlocks the '${name}' technology`);
 };
 
-// ---- policies (they do nothing for now) ----
+// ---- policies ----
 
 export const getPolicy = (name: string) => policyTree.flat().find((p) => p.name === name) ?? fail(`Unknown policy ${name}`);
 
-// Tax reformation: an opponent who uses a spy, trader, missionary or inquisitor on you pays you gold.
-export const isTaxed = (player: Pick<Player, 'id'>, target: Pick<Player, 'id' | 'unlockedTechnologies'>) =>
-	player.id !== target.id && hasEffect(target, 'taxes');
-
-const payTax = (state: GameState, player: Player, target: Player) => {
-	if (!isTaxed(player, target)) return;
-	if (player.resources.gold < taxGold) fail(`${target.name} has strict taxes, that costs ${taxGold} gold`);
-	player.resources.gold -= taxGold;
-	target.resources.gold += taxGold;
-	addLog(state, `${playerTag(player)} pays ${taxGold} gold in taxes to ${playerTag(target)}`);
+// Tax reformation: once a generation is born, each opponent pays you taxGold for each of their units on your
+// buildings inside your wall (whatever your gold cap): inquisitors first, then spies and missionaries. Armies on farms
+// and estates pay nothing. A unit they cannot pay for returns to their stock, so when their gold runs out missionaries
+// return first.
+const taxOrder: Unit['type'][] = ['inquisitor', 'spy', 'missionary'];
+const collectTaxes = (state: GameState) => {
+	for (const taxer of state.players.filter((p) => hasEffect(p, 'taxReformation'))) {
+		const paid = new Map<Player, number>();
+		const taxed = (state.units ?? []).filter((u) => taxOrder.includes(u.type));
+		for (const unit of taxed.toSorted((a, b) => taxOrder.indexOf(a.type) - taxOrder.indexOf(b.type))) {
+			const building = state.buildings.find((b) => b.x === unit.x && b.y === unit.y);
+			if (building?.ownerId !== taxer.id || unit.ownerId === taxer.id) continue;
+			const owner = getPlayer(state, unit.ownerId);
+			const tax: Cost[] = [{ amount: taxGold, resourceType: 'gold' }];
+			if (canSpend(state, owner, tax)) {
+				spend(state, owner, tax);
+				taxer.resources.gold += taxGold;
+				paid.set(owner, (paid.get(owner) ?? 0) + taxGold);
+			} else {
+				state.units = state.units!.filter((u) => u !== unit);
+				owner.undeployedUnits = [...(owner.undeployedUnits ?? []), unit.type];
+				addLog(state, `${playerTag(owner)} cannot pay ${playerTag(taxer)}'s taxes: their ${unit.type} returns to their player board`);
+			}
+		}
+		for (const [owner, gold] of paid) addLog(state, `${playerTag(owner)} pays ${playerTag(taxer)} ${gold} gold in taxes`);
+	}
 };
 
-// Spies and inquisitors can only be bought once their technology is unlocked, mercenaries while Mercenary warfare is
-// in effect; units already in stock stay.
-export const isUnitUnlocked = (player: EffectHolder, type: string) => !unitEffect[type] || hasEffect(player, unitEffect[type]);
+// Units already in stock stay usable. Spies, inquisitors and mercenaries are unlocked by their technology or policy, the other units by having a
+// building of their resource (also when an opponent's unit is on it).
+export const isUnitUnlocked = (state: GameState | PublicGameState, player: EffectHolder & Pick<Player, 'id'>, type: string) =>
+	unitEffect[type]
+		? hasEffect(player, unitEffect[type])
+		: state.buildings.some((b) => b.ownerId === player.id && getBuildingStats(b.type).resourceType === getUnitStats(type).resourceType);
+
+// What unlocks a unit, for its hover text: "Cryptography", or "a materials building".
+export const unitUnlockText = (type: string) => {
+	const effect = unitEffect[type];
+	if (!effect) return `a ${getUnitStats(type).resourceType} building`;
+	return [...technologyTree.flat(), ...policyTree.flat()].find((i) => i.effect === effect)?.name ?? effect;
+};
+
+// Whether you have the technology a policy needs before you can buy it (Espionage: Tradecraft).
+export const meetsRequirement = (player: EffectHolder, policy: { requires?: string }) =>
+	!policy.requires || (player.unlockedTechnologies ?? []).includes(policy.requires);
 
 // Buying a policy unlocks it; it works once it is implemented in one of your slots.
 export const unlockPolicy = (state: GameState, playerId: string, name: string) => {
@@ -1226,6 +1499,7 @@ export const unlockPolicy = (state: GameState, playerId: string, name: string) =
 	const player = getPlayer(state, playerId);
 	if (!policy.cost.length) fail('That policy cannot be bought yet');
 	if ((player.unlockedPolicies ?? []).includes(name)) fail('You already have that policy');
+	if (!meetsRequirement(player, policy)) fail(`Unlock '${policy.requires}' first`);
 	pay(state, player, policy.cost, [], name);
 	player.unlockedPolicies = [...(player.unlockedPolicies ?? []), name];
 	addLog(state, `${playerTag(player)} unlocks the '${name}' policy`);
@@ -1240,6 +1514,7 @@ export const implementPolicy = (state: GameState, playerId: string, name: string
 	if (inEffect.includes(name)) fail('That policy is already in effect');
 	if (!Number.isInteger(slot) || slot < 0 || slot >= policySlots || inEffect[slot]) fail('That policy slot is not empty');
 	player.policiesInEffect = Array.from({ length: policySlots }, (_, i) => (i === slot ? name : (inEffect[i] ?? null)));
+	player.policyGenerations = { ...player.policyGenerations, [name]: state.stats.nrOfGenerations };
 	addLog(state, `${playerTag(player)} implements the '${name}' policy`);
 };
 
@@ -1249,26 +1524,24 @@ export const removePolicy = (state: GameState, playerId: string, name: string) =
 	if (!(player.policiesInEffect ?? []).includes(name)) fail('That policy is not in effect');
 	pay(state, player, policyRemoveCost, [], 'policy removal');
 	player.policiesInEffect = player.policiesInEffect!.map((p) => (p === name ? null : p));
+	delete player.policyGenerations?.[name];
 	addLog(state, `${playerTag(player)} removes the '${name}' policy`);
 };
 
-const payCulture = (player: Player, amount: number) => {
-	if (player.resources.culture < amount) fail(`That costs ${amount} culture`);
-	player.resources.culture -= amount;
-};
+const payCulture = (state: GameState, player: Player, amount: number) => spend(state, player, [{ amount, resourceType: 'culture' }]);
 
-// Bribery: an opponent's unit on one of your buildings is removed for gold. The gold goes nowhere.
+// Ambassador bribes: an opponent's unit on one of your buildings is removed for gold. The gold goes nowhere.
 export const bribe = (state: GameState, playerId: string, unitId: string) => {
 	assertTurn(state, playerId);
 	const player = getPlayer(state, playerId);
-	if (!hasEffect(player, 'bribery')) fail('Bribery is not in effect');
+	if (!hasEffect(player, 'ambassadorBribes')) fail('Ambassador bribes is not in effect');
 	const unit = (state.units ?? []).find((u) => u.id === unitId) ?? fail('That unit is not on the board');
 	const building = state.buildings.find((b) => b.x === unit.x && b.y === unit.y);
 	if (building?.ownerId !== playerId || unit.ownerId === playerId) fail("You can only bribe an opponent's unit on your own building");
-	if (player.resources.gold < bribeGold) fail(`That costs ${bribeGold} gold`);
-	player.resources.gold -= bribeGold;
+	const price = bribeGold[unit.type as keyof typeof bribeGold] ?? fail(`A ${unit.type} cannot be bribed`);
+	spend(state, player, [{ amount: price, resourceType: 'gold' }]);
 	state.units = state.units!.filter((u) => u !== unit);
-	addLog(state, `${playerTag(player)} bribes ${playerTag(getPlayer(state, unit.ownerId))}'s ${unit.type} away from their ${building.type}`);
+	addLog(state, `${playerTag(player)} bribes ${playerTag(getPlayer(state, unit.ownerId))}'s ${unit.type} away from their ${building!.type}`);
 };
 
 // ---- the actions of the culture technologies ----
@@ -1277,10 +1550,10 @@ export const bribe = (state: GameState, playerId: string, unitId: string) => {
 export const retrainTalent = (state: GameState, playerId: string, index: number, talent: Talent) => {
 	assertTurn(state, playerId);
 	const player = getPlayer(state, playerId);
-	if (!hasEffect(player, 'retraining')) fail("Unlock the 'Reeducation programs' technology first");
+	if (!hasEffect(player, 'reeducationPrograms')) fail("Unlock the 'Reeducation programs' technology first");
 	const from = player.talents[index] ?? fail('You do not have that talent');
 	if (!isTalent(talent) || talent === from) fail('Choose another talent');
-	payCulture(player, retrainCost);
+	payCulture(state, player, reeducationCost);
 	player.talents[index] = talent;
 	addLog(state, `${playerTag(player)} reeducates a ${from} to a ${talent}`);
 };
@@ -1290,10 +1563,11 @@ export const indoctrinate = (state: GameState, playerId: string, targetId: strin
 	assertTurn(state, playerId);
 	const player = getPlayer(state, playerId);
 	const target = getPlayer(state, targetId);
-	if (!hasEffect(player, 'indoctrination')) fail("Unlock the 'Fresco paintings' technology first");
+	if (!hasEffect(player, 'frescoPaintings')) fail("Unlock the 'Fresco paintings' technology first");
 	if (target === player) fail('That is your own talent');
+	if (hasEffect(target, 'subsidies')) fail(`${target.name} has Subsidies: their people cannot be convinced to leave`);
 	const talent = target.talents[index] ?? fail(`${target.name} does not have that talent`);
-	payCulture(player, indoctrinateCost);
+	payCulture(state, player, frescoCost);
 	target.talents.splice(index, 1);
 	player.talents.push(talent);
 	addLog(state, `${playerTag(player)} indoctrinates ${playerTag(target)}'s ${talent}`);
@@ -1304,10 +1578,11 @@ export const propaganda = (state: GameState, playerId: string, targetId: string)
 	assertTurn(state, playerId);
 	const player = getPlayer(state, playerId);
 	const target = getPlayer(state, targetId);
-	if (!hasEffect(player, 'propaganda')) fail("Unlock the 'Propaganda posters' technology first");
+	if (!hasEffect(player, 'propagandaPosters')) fail("Unlock the 'Propaganda posters' technology first");
 	if (target === player) fail('That is your own person');
+	if (hasEffect(target, 'subsidies')) fail(`${target.name} has Subsidies: their people cannot be convinced to leave`);
 	if (target.people < 1) fail(`${target.name} has no regular people`);
-	payCulture(player, propagandaCost);
+	payCulture(state, player, propagandaCost);
 	target.people -= 1;
 	player.people += 1;
 	addLog(state, `${playerTag(player)}'s propaganda wins over one of ${playerTag(target)}'s people`);

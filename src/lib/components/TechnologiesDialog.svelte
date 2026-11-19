@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { technologies, technologyDiscount } from '#lib/game/config.ts';
-	import { canPay, costLabel, isNextTechnology, technologyCost } from '#lib/game/logic.ts';
+	import { technologies, technologyDiscount, type Cost } from '#lib/game/config.ts';
+	import { canPay, costLabel, isNextTechnology, technologyCost, technologyDescription } from '#lib/game/logic.ts';
 	import type { PublicGameState, PublicPlayer } from '#lib/game/types.ts';
 	import InfoIcon from './InfoIcon.svelte';
 	import LockIcon from './LockIcon.svelte';
@@ -22,6 +22,8 @@
 	} = $props();
 
 	const unlocked = $derived(me?.unlockedTechnologies ?? []);
+	// each part of a cost you cannot pay is red
+	const isUnmet = (c: Cost) => !!me && !canPay(game, me, [c]);
 	const costOf = (name: string) => (me ? technologyCost(game, me.id, name) : technologies.flat().find((t) => t.name === name)!.cost);
 </script>
 
@@ -62,8 +64,16 @@
 							{/each}
 						</span>
 						<span class="name">{technology.name}</span>
-						<span class="description">{technology.description}</span>
-						{#if !isUnlocked}<span class="cost">{costLabel(cost)}</span>{/if}
+						<span class="description">{technologyDescription(game, technology)}</span>
+						{#if !isUnlocked}
+							<span class="cost">
+								{#each cost as c, k (k)}{k ? ' · ' : ''}<span class:unmet={isUnmet(c)}>{costLabel([c])}</span>{/each}
+							</span>
+							<!-- the one above it in its column comes first -->
+							{#if me && i > 0 && !unlocked.includes(column[i - 1].name)}
+								<span class="cost unmet">Needs {column[i - 1].name}</span>
+							{/if}
+						{/if}
 					</button>
 				{/each}
 			</div>
@@ -229,5 +239,9 @@
 		border-top: 0.5rem solid var(--color-grayscale-5);
 
 		transform: translateX(-50%);
+	}
+	/* what you are missing, like in the action selector; faded with the rest when the item is greyed out */
+	.unmet {
+		color: var(--color-danger);
 	}
 </style>

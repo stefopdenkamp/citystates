@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resourceTypes } from '#lib/game/config.ts';
-	import { fullName, isLowered, overviewText, peopleCap, peopleCount, peopleText } from '#lib/game/logic.ts';
+	import { fullName, isLowered, overviewText } from '#lib/game/logic.ts';
 	import type { PublicGameState, PublicPlayer } from '#lib/game/types.ts';
 
 	let { game, me, onNext }: { game: PublicGameState; me: PublicPlayer | null; onNext: () => void } = $props();
@@ -11,58 +11,35 @@
 <dialog {@attach (node) => node.showModal()} oncancel={(event) => event.preventDefault()}>
 	<h2>The legacy of a generation</h2>
 
+	<!-- per player a row of containers, one per resource, with the cap above it (red when it was reached): what they had as gray
+	     disks, what they gained in the resource color -->
 	{#if game.legacy}
-		<table>
-			<thead>
-				<tr>
-					<th></th>
-					{#each game.players as player (player.id)}
-						<td class="gap"></td>
-						<th colspan="3" class="player" class:me={player.id === me?.id} data-color={player.color}>
-							{fullName(game, player)}
-						</th>
-					{/each}
-				</tr>
-				<tr class="sub">
-					<th></th>
-					{#each game.players as player (player.id)}
-						<td class="gap"></td>
-						<th>Produced</th>
-						<th>Total</th>
-						<th>Cap</th>
-					{/each}
-				</tr>
-			</thead>
-			<tbody>
-				<tr data-resource="people">
-					<th>people</th>
-					{#each game.players as player (player.id)}
-						<td class="gap"></td>
-						<td>–</td>
-						<td title={peopleText(player)}>{peopleCount(player)}</td>
-						<td class:lowered={isLowered(game, player.id, 'people', 'cap')} title={overviewText(game, player.id, 'people', 'cap')}>
-							{peopleCap(game, player.id)}
-						</td>
-					{/each}
-				</tr>
-				{#each resourceTypes as resource (resource)}
-					<tr data-resource={resource}>
-						<th>{resource}</th>
-						{#each game.players as player (player.id)}
+		<div class="players">
+			{#each game.players as player (player.id)}
+				<section data-color={player.color}>
+					<h3>{fullName(game, player)}</h3>
+					<div class="containers">
+						{#each resourceTypes as resource (resource)}
 							{@const line = game.legacy[player.id][resource]}
-							<td class="gap"></td>
-							<td class:lowered={isLowered(game, player.id, resource, 'production')} title={overviewText(game, player.id, resource, 'production')}>
-								+{line.production}
-							</td>
-							<td class:capped={line.isCapped} title={line.isCapped ? 'Cap reached' : undefined}>{line.after}</td>
-							<td class:lowered={isLowered(game, player.id, resource, 'cap')} title={overviewText(game, player.id, resource, 'cap')}>
-								{line.cap}
-							</td>
+							<div class="resource" data-resource={resource}>
+								<span
+									class="cap"
+									class:lowered={isLowered(game, player.id, resource, 'cap') || line.isCapped}
+									title={`${line.isCapped ? 'Cap reached\n\n' : ''}${overviewText(game, player.id, resource, 'cap')}`}>Cap {line.cap}</span
+								>
+								<div
+									class="container"
+									title={`${resource[0].toUpperCase() + resource.slice(1)}: ${line.after}\n\n${overviewText(game, player.id, resource, 'production')}`}
+								>
+									{#each { length: Math.min(line.before, line.after) }, i (i)}<span class="piece disk had"></span>{/each}
+									{#each { length: Math.max(0, line.after - line.before) }, i (i)}<span class="piece disk"></span>{/each}
+								</div>
+							</div>
 						{/each}
-					</tr>
-				{/each}
-			</tbody>
-		</table>
+					</div>
+				</section>
+			{/each}
+		</div>
 	{/if}
 
 	{#if waitingFor.length}
@@ -81,8 +58,6 @@
 
 <style>
 	dialog {
-		min-width: 40vw;
-		min-height: 40vh;
 		max-width: 95vw;
 		text-align: center;
 	}
@@ -99,70 +74,78 @@
 		font: var(--font-h2);
 	}
 
-	/* fixed, so the columns divide the width evenly */
-	table {
-		width: 100%;
+	/* per player their name in their color, with their containers under it */
+	.players {
+		display: flex;
+		flex-direction: column;
+		gap: 1.5rem;
 		margin: 1rem 0;
-
-		border-collapse: collapse;
-		table-layout: fixed;
-		font: var(--font-small);
 	}
 
-	/* centered, so the numbers line up under their column headers */
-	th,
-	td {
-		padding: 0.3rem 0.6rem;
+	h3 {
+		margin: 0 0 0.3rem;
 		text-align: center;
 
-		border-bottom: 1px solid var(--color-grayscale-3);
+		color: var(--player-color);
+		font: var(--font-normal);
+		font-weight: 700;
 	}
 
-	.player {
-		text-align: center;
-
-		border-bottom: 3px solid var(--player-color);
+	.containers {
+		display: grid;
+		grid-template-columns: repeat(6, max-content);
+		align-items: start;
+		gap: 0.6rem;
 	}
 
-	.player.me {
-		color: var(--color-accent);
+	.resource {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		min-width: 0;
 	}
 
-	.sub th {
+	.cap {
 		color: var(--color-grayscale-5);
 		font: var(--font-tiny);
-	}
-
-	tbody th {
-		text-align: left;
-
-		color: var(--resource-color);
-		text-transform: capitalize;
-	}
-
-	.gap {
-		width: 1rem;
-		padding: 0;
-
-		border: none;
-	}
-
-	td[title] {
 		cursor: help;
 	}
 
-	/* something, like an opponent's army, spy or missionary, lowers this production or cap */
-	.lowered {
+	/* the disks of a resource, in a box of its color: 5 per row from the top left, 4 rows high up to 20 disks, then it
+	   grows a row for every 5 more */
+	.container {
+		--disk: 1.2rem;
+
+		display: grid;
+		grid-template-columns: repeat(5, var(--disk));
+		grid-template-rows: repeat(4, var(--disk));
+		grid-auto-rows: var(--disk);
+		align-content: start;
+		gap: 0.15rem;
+		padding: 0.5rem;
+
+		border: 2px solid color-mix(in srgb, var(--resource-color) 70%, transparent);
+		border-radius: var(--border-radius);
+		cursor: help;
+	}
+
+	/* a low disk in 3D (see .piece in app.css) */
+	.disk {
+		--width: var(--disk);
+		--depth: 0.27rem;
+	}
+
+	.disk.had {
+		--piece-color: var(--color-grayscale-4);
+	}
+
+	/* the cap was reached, or something (like an opponent's spy) lowers it */
+	.cap.lowered {
 		color: var(--color-danger);
 	}
 
 	.waiting {
 		color: var(--player-color);
-	}
-
-	.capped {
-		color: var(--color-danger);
-		font-weight: 700;
 	}
 
 	.note {

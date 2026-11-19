@@ -11,8 +11,9 @@ export type Player = {
 	name: string;
 	color: string;
 	characteristics: Record<Characteristic, string>;
-	isConnected: boolean;
+	isConnected: boolean; // a bot is always connected
 	isReadyForGame: boolean;
+	bot?: string; // the name of the bot that plays it (see bots in config), missing for a person
 	isReadyForNextGeneration: boolean;
 	isTurn: boolean;
 	center: { x: number; y: number };
@@ -28,6 +29,7 @@ export type Player = {
 	policiesInEffect?: (string | null)[]; // the unlocked policy in each of the 3 slots, null when the slot is empty
 	unlockedTechnologies?: string[]; // bought technologies, in the order bought (missing in older games)
 	technologyGenerations?: Record<string, number>; // stats.nrOfGenerations when each technology was unlocked
+	policyGenerations?: Record<string, number>; // stats.nrOfGenerations when each policy in effect was implemented (Bread and circuses counts from it)
 	tradedWith?: string[]; // the opponents traded with this turn
 	tradeGain?: number; // the resources received through trade this generation (Trade empire)
 };
@@ -40,7 +42,7 @@ export type Building = {
 	y: number;
 };
 
-// A unit placed on an opponent's building; it stays with the cell when the building is upgraded.
+// A unit on a building (or a city centre); it stays with the cell when the building is replaced.
 export type Unit = {
 	id: string;
 	type: 'army' | 'mercenary' | 'spy' | 'missionary' | 'inquisitor' | 'trader'; // a trader is never placed, it is used in a trade
@@ -55,7 +57,8 @@ export type Auction = {
 	deficits: Record<string, number>; // people each player needs to reach their cap
 	eligible: string[]; // player ids
 	bids: Record<string, number>; // in the talent's own resource
-	cultureBids: Record<string, number>; // culture adds to any bid, 1 for 1
+	cultureBids: Record<string, number>; // culture adds to any bid (see cultureWorth)
+	history?: { playerId: string; amount: number; culture: number; total: number }[]; // every bid on this talent (missing in older games)
 	done: string[];
 	won: Record<string, number>; // talents won this generation per player
 	regularPeople: number;
@@ -73,8 +76,8 @@ export type GameState = {
 	objectives: number[];
 	enabledCharacteristics: Record<Characteristic, boolean>;
 	isCityCentreEnabled: boolean;
+	isBuildOverFarmsEnabled?: boolean; // F&E can also replace opponents' F&E (missing in older games)
 	isReligiousDominanceEnabled?: boolean; // an extra objective (missing in older games)
-	isBuildingLimitEnabled?: boolean; // at most 1 building of each type, farms and estates excepted (missing in older games)
 	isTestMode?: boolean; // buildings, units, technologies and policies cost nothing (missing in older games)
 	isTutorialEnabled?: boolean; // every player is shown the tutorial when the game starts (missing in older games)
 	winnerIds?: string[]; // set when the game is finished, more than one is a draw
@@ -93,7 +96,9 @@ export type GameState = {
 	units: Unit[];
 	auction: Auction | null;
 	legacy: Record<string, Record<ResourceType, LegacyLine>> | null;
-	lastBorn: { people: number; talents: number } | null;
+	// the people born this generation: what was drawn, in the order it was drawn, and how many people each player needed
+	// (drawn and deficits are missing in older games)
+	lastBorn: { people: number; talents: number; drawn?: PoolItem[]; deficits?: Record<string, number> } | null;
 	stats: { nrOfGenerations: number; nrOfTurns: number };
 	chatHistory: { playerId: string; name: string; color: string; text: string; at: number }[];
 	log: { text: string; at: number }[];
@@ -109,6 +114,7 @@ export type LobbyGame = {
 	playerCount: number;
 	connectedCount: number;
 	maxPlayerCount: number;
+	botCount: number; // a player who joins a full open game takes the place of a bot
 	hasPassword: boolean;
 	winners: { name: string; color: string }[]; // of a finished game
 };
@@ -121,8 +127,8 @@ export type GameSettings = {
 	objectives: (number | 'random' | 'none')[]; // 'none' leaves the slot out
 	enabledCharacteristics: Record<Characteristic, boolean>;
 	isCityCentreEnabled: boolean;
+	isBuildOverFarmsEnabled: boolean;
 	isReligiousDominanceEnabled: boolean;
-	isBuildingLimitEnabled: boolean;
 	isTestMode: boolean;
 	isTutorialEnabled: boolean;
 	password: string | null;
@@ -137,6 +143,8 @@ export type ClientMessage =
 	| { type: 'player:ready'; ready: boolean }
 	| { type: 'player:adopt'; playerId: string }
 	| { type: 'game:start' }
+	| { type: 'bot:add'; bot: string }
+	| { type: 'bot:remove'; playerId: string }
 	| { type: 'auction:bid'; amount: number; culture: number }
 	| { type: 'auction:done' }
 	| { type: 'build'; building: string; x: number; y: number; talents?: Talent[] }

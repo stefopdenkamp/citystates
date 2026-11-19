@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { retrainCost, talentResource, talents, type Talent } from '#lib/game/config.ts';
+	import { reeducationCost, talentResource, talents, type Talent } from '#lib/game/config.ts';
 	import PersonIcon from './PersonIcon.svelte';
 
 	// Reeducation programs: one of your talents becomes another talent, for culture.
 	let {
 		talent,
-		culture,
+		canPay,
 		onRetrain,
 		onCancel
-	}: { talent: Talent; culture: number; onRetrain: (talent: Talent) => void; onCancel: () => void } = $props();
+	}: { talent: Talent; canPay: boolean; onRetrain: (talent: Talent) => void; onCancel: () => void } = $props();
 
 	const others = $derived(talents.filter((t) => t !== talent));
 	let chosen = $state<Talent | ''>('');
@@ -32,10 +32,10 @@
 		</select>
 	</label>
 
-	<p class="note">Costs {retrainCost} culture, you have {culture}.</p>
+	<p class="note" class:unmet={!canPay}>Costs {reeducationCost} culture</p>
 
 	<div class="buttons">
-		<button class="primary" disabled={!chosen || culture < retrainCost} onclick={() => chosen && onRetrain(chosen)}>Reeducate</button>
+		<button class="primary" disabled={!chosen || !canPay} onclick={() => chosen && onRetrain(chosen)}>Reeducate</button>
 		<button onclick={onCancel}>Cancel</button>
 	</div>
 </dialog>
@@ -86,6 +86,10 @@
 	.note {
 		color: var(--color-grayscale-5);
 		font: var(--font-small);
+	}
+
+	.note.unmet {
+		color: var(--color-danger);
 	}
 
 	.buttons {

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { policies, policyRemoveCost, policySlots } from '#lib/game/config.ts';
-	import { canPay, costLabel } from '#lib/game/logic.ts';
+	import { policies, policyRemoveCost, policySlots, type Cost } from '#lib/game/config.ts';
+	import { canPay, costLabel, meetsRequirement } from '#lib/game/logic.ts';
 	import type { PublicGameState, PublicPlayer } from '#lib/game/types.ts';
 	import InfoIcon from './InfoIcon.svelte';
 	import LockIcon from './LockIcon.svelte';
@@ -26,6 +26,8 @@
 	} = $props();
 
 	const unlocked = $derived(me?.unlockedPolicies ?? []);
+	// each part of a cost you cannot pay is red
+	const isUnmet = (c: Cost) => !!me && !canPay(game, me, [c]);
 	const inEffect = $derived(me?.policiesInEffect ?? []);
 	// implementing a policy is free, removing one costs power
 	const canRemove = $derived(isMyTurn && !!me && canPay(game, me, policyRemoveCost));
@@ -90,7 +92,7 @@
 				{#each column as policy (policy.name)}
 					{@const isUnlocked = unlocked.includes(policy.name)}
 					{@const isInEffect = inEffect.includes(policy.name)}
-					{@const canUnlock = isMyTurn && !!me && !isUnlocked && policy.cost.length > 0 && canPay(game, me, policy.cost)}
+					{@const canUnlock = isMyTurn && !!me && !isUnlocked && policy.cost.length > 0 && canPay(game, me, policy.cost) && meetsRequirement(me, policy)}
 					<button
 						class="item"
 						data-resource={policy.color ?? policy.cost[0]?.resourceType}
@@ -116,9 +118,13 @@
 					>
 						<LockIcon class="lock" open={isUnlocked} />
 						<span class="name">{policy.name}</span>
-						<span class="description">{policy.description}</span>
+						<span class="description"
+							>{policy.description}</span
+						>
 						{#if !isUnlocked && policy.cost.length}
-							<span class="cost">{costLabel(policy.cost)}</span>
+							<span class="cost">
+								{#if policy.requires}<span class:unmet={!!me && !meetsRequirement(me, policy)}>needs {policy.requires}</span> · {/if}{#each policy.cost as c, k (k)}{k ? ' · ' : ''}<span class:unmet={isUnmet(c)}>{costLabel([c])}</span>{/each}
+							</span>
 						{/if}
 					</button>
 				{/each}
@@ -346,5 +352,9 @@
 		color: var(--color-grayscale-5);
 		font: var(--font-tiny);
 		font-size: 0.6rem;
+	}
+	/* what you are missing, like in the action selector; faded with the rest when the item is greyed out */
+	.unmet {
+		color: var(--color-danger);
 	}
 </style>

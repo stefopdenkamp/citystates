@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { objectives, resourceTypes } from '#lib/game/config.ts';
-	import { fullName, getPlayer, objectiveProgress } from '#lib/game/logic.ts';
+	import { fullName, getPlayer, objectiveAmount } from '#lib/game/logic.ts';
 	import type { PublicGameState } from '#lib/game/types.ts';
 
 	// Shown to everyone once the game has ended; more than one winner is a draw.
@@ -20,6 +20,7 @@
 			{i > 0 ? ' and ' : ''}<span class="winner" data-color={winner.color}>{fullName(game, winner)}</span>
 		{/each}
 	</h2>
+	<p class="generations">After {game.stats.nrOfGenerations} {game.stats.nrOfGenerations === 1 ? 'generation' : 'generations'}</p>
 	{#if winners.length > 1}<p class="draw">It is a draw</p>{/if}
 
 	<table>
@@ -39,7 +40,7 @@
 				<tr>
 					<td>{objectives[objective].name}</td>
 					{#each columns as player (player.id)}
-						<td class="value">{Math.round(objectiveProgress(game, player.id, objective) * 100)}%</td>
+						<td class="value">{Math.round((objectiveAmount(game, player.id, objective) / objectives[objective].goal) * 100)}%</td>
 					{/each}
 				</tr>
 			{/each}
@@ -79,6 +80,7 @@
 		color: var(--player-color);
 	}
 
+	.generations,
 	.draw {
 		color: var(--color-grayscale-5);
 		font: var(--font-small);

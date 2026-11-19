@@ -11,8 +11,8 @@ const settings: GameSettings = {
 	objectives: ['random', 'random', 'random'],
 	enabledCharacteristics: { title: false, personalityTrait: false, cityState: false },
 	isCityCentreEnabled: false,
+	isBuildOverFarmsEnabled: false,
 	isReligiousDominanceEnabled: false,
-	isBuildingLimitEnabled: false,
 	isTestMode: false,
 	isTutorialEnabled: false,
 	password: null
@@ -34,6 +34,15 @@ const startedGame = (playerCount: number) => {
 const toActionPhase = (state: GameState) => {
 	game.finishBorn(state, 0);
 	expect(state.phase).toBe('action');
+};
+
+// Armies, traders and missionaries need a building of their resource: a blacksmith, stall and shrine inside the wall.
+// Pass the building types first to give only those.
+const unlockBasicUnits = (state: GameState, ...args: (GameState['players'][number] | string[])[]) => {
+	const types = Array.isArray(args[0]) ? (args.shift() as string[]) : ['blacksmith', 'stall', 'shrine'];
+	for (const p of args as GameState['players']) {
+		types.forEach((type, i) => state.buildings.push({ id: `${type}-${p.id}`, type, ownerId: p.id, x: p.center.x - 1 + i, y: p.center.y - 1 }));
+	}
 };
 
 const endAllTurns = (state: GameState) => {
@@ -93,11 +102,18 @@ describe('a generation', () => {
 	test('the first generation fills the people cap of 2 farms', () => {
 		const state = startedGame(2);
 		expect(state.buildings.filter((b) => b.type === 'farm')).toHaveLength(4);
-		expect(state.lastBorn).toEqual({ people: 4, talents: 0 });
+		expect(state.lastBorn).toMatchObject({ people: 4, talents: 0 });
 		toActionPhase(state);
 		expect(state.players.map((p) => p.people)).toEqual([2, 2]);
 		expect(state.peoplePool).toHaveLength(regularPeopleInPool - 4);
 		expect(state.players[0].isTurn).toBe(true);
+	});
+
+	test('what was drawn and what each player needed are kept for the born dialog', () => {
+		const state = startedGame(2);
+		toActionPhase(state);
+		expect(state.lastBorn?.drawn).toEqual(['person', 'person', 'person', 'person']);
+		for (const player of state.players) expect(state.lastBorn?.deficits?.[player.id]).toBe(2);
 	});
 
 	test('building, producing and the cap', () => {
@@ -109,7 +125,8 @@ describe('a generation', () => {
 		game.build(state, player.id, 'blacksmith', x, y);
 		expect(player.people).toBe(1);
 		expect(state.peoplePool).toHaveLength(regularPeopleInPool - 2 + 1);
-		expect(() => game.build(state, player.id, 'blacksmith', x, y)).toThrow();
+		game.build(state, player.id, 'blacksmith', x, y); // over the first one
+		expect(state.buildings.filter((b) => b.type === 'blacksmith')).toHaveLength(1);
 
 		endAllTurns(state);
 		expect(state.phase).toBe('legacy');
@@ -127,9 +144,9 @@ describe('a generation', () => {
 		toActionPhase(state);
 		const player = state.players[0];
 		for (let i = 0; i < 6; i++) state.buildings.push({ id: `b${i}`, type: 'blacksmith', ownerId: player.id, x: 0, y: i });
-		player.resources.materials = 2;
+		player.resources.materials = 1;
 		endAllTurns(state);
-		expect(state.legacy![player.id].materials).toEqual({ before: 2, production: 6, cap: 4, after: 4, isCapped: true });
+		expect(state.legacy![player.id].materials).toEqual({ before: 1, production: 6, cap: 2, after: 2, isCapped: true });
 	});
 
 	test('the start player rotates every generation', () => {
@@ -223,41 +240,96 @@ describe('placement', () => {
 		}
 	});
 
-	test('the starting farms are in the second ring', () => {
-		const state = startedGame(2);
-		for (const player of state.players) {
-			const farms = state.buildings.filter((b) => b.ownerId === player.id);
-			expect(farms).toHaveLength(2);
-			expect(farms.every((f) => ring(player.center, `${f.x},${f.y}`) === 2)).toBe(true);
+	test('the starting farms are on opposite sides of the wall, each touching it with 2 cells, staggered', () => {
+		for (let i = 0; i < 20; i++) {
+			const state = startedGame(1 + (i % 6));
+			for (const player of state.players) {
+				const { x: cx, y: cy } = player.center;
+				const farms = state.buildings.filter((b) => b.ownerId === player.id).map((b) => ({ dx: b.x - cx, dy: b.y - cy }));
+				expect(farms).toHaveLength(2);
+				const layout = farms.map(({ dx, dy }) => `${dx},${dy}`).sort().join(' ');
+				expect(['-1,-3 0,2', '-1,2 0,-3', '-3,-1 2,0', '-3,0 2,-1']).toContain(layout);
+			}
 		}
 	});
 
-	test('farms do not extend where other buildings can go', () => {
+	test('buildings go on the 8 cells inside the wall, also over another building', () => {
 		const state = startedGame(1);
 		const player = state.players[0];
 		const { x, y } = player.center;
-		state.buildings = [{ id: 'f', type: 'farm', ownerId: player.id, x: x + 1, y }];
 		const cells = game.validCells(state, player.id, 'blacksmith');
-		expect(cells.has(`${x + 2},${y}`)).toBe(false);
+		expect(cells.size).toBe(8);
 		expect([...cells].every((c) => ring(player.center, c) === 1)).toBe(true);
+		state.buildings.push({ id: 'b', type: 'stall', ownerId: player.id, x: x + 1, y });
+		expect(game.validCells(state, player.id, 'bank').has(`${x + 1},${y}`)).toBe(true);
 	});
 
-	test('farms go up to 2 rings from the center or other buildings, but not from farms', () => {
+	test('farms and estates go outside the wall, bordering it or your other F&E', () => {
 		const state = startedGame(1);
 		const player = state.players[0];
+		state.gridSize = 21;
+		player.center = { x: 10, y: 10 };
 		const { x, y } = player.center;
 		state.buildings = [];
-		const fromCenter = game.validCells(state, player.id, 'farm');
-		expect(fromCenter.size).toBe(24);
-		expect(Math.max(...[...fromCenter].map((c) => ring(player.center, c)))).toBe(2);
-
-		state.buildings = [{ id: 'b', type: 'blacksmith', ownerId: player.id, x: x + 1, y }];
-		const withBlacksmith = game.validCells(state, player.id, 'farm');
-		expect(withBlacksmith.has(`${x + 3},${y}`)).toBe(true);
-		expect(withBlacksmith.has(`${x + 4},${y}`)).toBe(false);
-
+		const farms = game.validCells(state, player.id, 'farm');
+		expect(farms.has(`${x + 2},${y}`)).toBe(true); // bordering the wall
+		expect(farms.has(`${x + 2},${y - 3}`)).toBe(true); // only 1 cell borders, at the corner
+		expect(farms.has(`${x + 1},${y}`)).toBe(false); // inside the wall
+		expect(farms.has(`${x + 3},${y}`)).toBe(false); // not bordering
 		state.buildings = [{ id: 'f', type: 'farm', ownerId: player.id, x: x + 2, y }];
-		expect(game.validCells(state, player.id, 'farm').has(`${x + 3},${y}`)).toBe(false);
+		const estates = game.validCells(state, player.id, 'estate');
+		expect(estates.has(`${x + 4},${y}`)).toBe(true); // next to the farm
+		expect(estates.has(`${x + 3},${y}`)).toBe(false); // over the farm
+		expect(estates.has(`${x + 5},${y}`)).toBe(false); // too far
+	});
+
+	test('farms and estates can go over your own farms and estates, which they replace', () => {
+		const state = startedGame(1);
+		game.finishBorn(state, 0);
+		const player = state.players[0];
+		state.gridSize = 21;
+		player.center = { x: 10, y: 10 };
+		const { x, y } = player.center;
+		state.buildings = [
+			{ id: 'f1', type: 'farm', ownerId: player.id, x: x + 2, y }, // bordering the wall
+			{ id: 'f2', type: 'farm', ownerId: player.id, x: x + 4, y } // bordering f1
+		];
+		// an estate over both farms, still bordering the wall
+		expect(game.replacedBuildings(state, player.id, 'estate', x + 2, y).map((b) => b.id)).toEqual(['f1', 'f2']);
+		expect(game.validCells(state, player.id, 'estate').has(`${x + 2},${y}`)).toBe(true);
+		// an estate over f2 only, bordering nothing once f2 is gone, is not allowed
+		expect(game.validCells(state, player.id, 'estate').has(`${x + 5},${y - 1}`)).toBe(false);
+		// not over a farm with an opponent's army on it
+		state.units = [{ id: 'e', type: 'army', ownerId: 'opponent', x: x + 4, y }];
+		expect(game.validCells(state, player.id, 'estate').has(`${x + 2},${y}`)).toBe(false);
+		// your own army on a replaced farm goes back to your stock
+		state.units = [{ id: 'a', type: 'army', ownerId: player.id, x: x + 4, y }];
+		player.people = 5;
+		game.build(state, player.id, 'estate', x + 2, y);
+		expect(state.buildings.map((b) => b.type)).toEqual(['estate']);
+		expect(state.units).toEqual([]);
+		expect(player.undeployedUnits).toEqual(['army']);
+		expect(state.log.at(-1)?.text).toEndWith('builds a estate over the farm and the farm');
+	});
+
+	test("with Build over farms F&E can replace opponents' F&E without an army of someone else on them", () => {
+		const { state, a, b } = twoPlayers();
+		const { x, y } = a.center;
+		state.buildings = [{ id: 'theirs', type: 'farm', ownerId: b.id, x: x + 2, y }]; // bordering a's wall
+		state.units = [];
+		expect(game.validCells(state, a.id, 'farm').has(`${x + 2},${y}`)).toBe(false);
+		state.isBuildOverFarmsEnabled = true;
+		expect(game.validCells(state, a.id, 'farm').has(`${x + 2},${y}`)).toBe(true);
+		// not with an army of an opponent on it, also the owner's own (Defensive strategies)
+		state.units = [{ id: 'd', type: 'army', ownerId: b.id, x: x + 2, y }];
+		expect(game.validCells(state, a.id, 'farm').has(`${x + 2},${y}`)).toBe(false);
+		// your own army on it goes back to your stock
+		state.units = [{ id: 'm', type: 'army', ownerId: a.id, x: x + 2, y }];
+		a.undeployedUnits = [];
+		game.build(state, a.id, 'farm', x + 2, y);
+		expect(state.buildings.map((b) => [b.type, b.ownerId])).toEqual([['farm', a.id]]);
+		expect(a.undeployedUnits).toEqual(['army']);
+		expect(state.log.at(-1)?.text).toEndWith(`builds a farm over {player:${b.id}}'s farm`);
 	});
 });
 
@@ -297,6 +369,21 @@ describe('city centre', () => {
 		game.finishBorn(state, 0);
 		expect(() => game.setCityCentre(state, state.players[0].id, 'gold')).toThrow();
 	});
+
+	test('with Grand Palazzo it produces 6, also when city centre production is off', () => {
+		const state = startedGame(1);
+		game.finishBorn(state, 0);
+		const player = state.players[0];
+		player.unlockedTechnologies = ['Grand Palazzo'];
+		game.setCityCentre(state, player.id, 'gold');
+		expect(game.resourceProduction(state, player.id, 'gold')).toBe(6);
+		expect(game.technologyDescription(state, game.getTechnology('Grand Palazzo'))).toStartWith('Click on your city centre to');
+		const { state: enabled, player: other } = withCityCentre();
+		other.unlockedTechnologies = ['Grand Palazzo'];
+		game.setCityCentre(enabled, other.id, 'faith');
+		expect(game.resourceProduction(enabled, other.id, 'faith')).toBe(6);
+		expect(game.technologyDescription(enabled, game.getTechnology('Grand Palazzo'))).toBe('Your city centre produces 6 instead of 1');
+	});
 });
 
 describe('army and spy', () => {
@@ -317,6 +404,7 @@ describe('army and spy', () => {
 	test('an army on a farm blocks its cap, a second army removes both', () => {
 		const { state, order } = threePlayers();
 		const [a, b, c] = order;
+		unlockBasicUnits(state, ...order);
 		const farm = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
 		expect(game.unitTargets(state, a.id, 'army').has(`${farm.x},${farm.y}`)).toBe(true);
 		expect(game.unitTargets(state, a.id, 'army').size).toBe(4); // the farms of b and c, not your own
@@ -337,12 +425,13 @@ describe('army and spy', () => {
 	test('bought units wait in your stock until placed', () => {
 		const { state, order } = threePlayers();
 		const [a, b] = order;
+		unlockBasicUnits(state, ...order);
 		const farm = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
 		expect(() => game.deployUnit(state, a.id, 'army', farm.x, farm.y)).toThrow();
 		game.buyUnit(state, a.id, 'army');
 		game.buyUnit(state, a.id, 'spy');
 		expect(a.undeployedUnits).toEqual(['army', 'spy']);
-		expect(a.resources.materials).toBe(12);
+		expect(a.resources.materials).toBe(13);
 		game.deployUnit(state, a.id, 'army', farm.x, farm.y);
 		game.endTurn(state, a.id, 0);
 		expect(a.undeployedUnits).toEqual(['spy']);
@@ -351,6 +440,7 @@ describe('army and spy', () => {
 	test('your own army removes an opponent army on your farm, but not your own army', () => {
 		const { state, order } = threePlayers();
 		const [a, b] = order;
+		unlockBasicUnits(state, ...order);
 		const farm = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
 		const ownFarm = state.buildings.find((x) => x.ownerId === b.id && x !== farm && x.type === 'farm')!;
 		game.buyUnit(state, a.id, 'army');
@@ -375,9 +465,9 @@ describe('army and spy', () => {
 		game.buyUnit(state, a.id, 'spy');
 		expect(() => game.deployUnit(state, a.id, 'spy', farm.x, farm.y)).toThrow();
 		game.deployUnit(state, a.id, 'spy', b.center.x + 1, b.center.y);
-		expect(game.resourceCap(state, b.id, 'materials')).toBe(8);
-		expect(game.resourceProduction(state, b.id, 'materials')).toBe(3);
-		expect(game.overviewText(state, b.id, 'materials', 'cap')).toBe('Cap 8\n- Armoury 9\n- 1 spy -1');
+		expect(game.resourceCap(state, b.id, 'materials')).toBe(4);
+		expect(game.resourceProduction(state, b.id, 'materials')).toBe(2);
+		expect(game.overviewText(state, b.id, 'materials', 'cap')).toBe('Cap 4\n- Armoury 5\n- 1 spy -1');
 		expect(game.isLowered(state, b.id, 'materials', 'cap')).toBe(true);
 		expect(game.isLowered(state, b.id, 'materials', 'production')).toBe(false);
 
@@ -386,7 +476,7 @@ describe('army and spy', () => {
 			{ id: 'bs1', type: 'blacksmith', ownerId: b.id, x: b.center.x - 1, y: b.center.y },
 			{ id: 'bs2', type: 'blacksmith', ownerId: b.id, x: b.center.x, y: b.center.y + 1 }
 		);
-		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +5\n- 2 blacksmiths +2\n- 1 armoury +3');
+		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +4\n- 2 blacksmiths +2\n- 1 armoury +2');
 		expect(game.overviewText(state, b.id, 'people', 'cap')).toBe('Cap 2\n- 2 farms +2');
 		expect(game.peopleText({ ...b, people: 3, talents: ['artist', 'scientist', 'scientist'] })).toBe(
 			'People 6\n- 3 regular people\n- Artist\n- 2 scientists'
@@ -396,6 +486,7 @@ describe('army and spy', () => {
 	test('missionaries stack, one per player, and each blocks 1 until nothing is left', () => {
 		const { state, order } = threePlayers();
 		const [a, b, c] = order;
+		unlockBasicUnits(state, ['shrine'], a, c);
 		const armoury = { x: b.center.x + 1, y: b.center.y };
 		const stall = { x: b.center.x - 1, y: b.center.y };
 		state.buildings.push({ id: 'ar', type: 'armoury', ownerId: b.id, ...armoury }, { id: 'st', type: 'stall', ownerId: b.id, ...stall });
@@ -408,7 +499,7 @@ describe('army and spy', () => {
 		game.deployUnit(state, a.id, 'missionary', armoury.x, armoury.y);
 		game.deployUnit(state, a.id, 'missionary', stall.x, stall.y);
 		expect(() => game.deployUnit(state, a.id, 'missionary', armoury.x, armoury.y)).toThrow(); // one per player
-		expect(game.resourceProduction(state, b.id, 'materials')).toBe(2);
+		expect(game.resourceProduction(state, b.id, 'materials')).toBe(1);
 		expect(game.resourceProduction(state, a.id, 'materials')).toBe(0); // the owner gets nothing (yet)
 		game.endTurn(state, a.id, 0);
 		game.endTurn(state, b.id, 0);
@@ -416,7 +507,7 @@ describe('army and spy', () => {
 		game.buyUnit(state, c.id, 'missionary');
 		game.deployUnit(state, c.id, 'missionary', armoury.x, armoury.y);
 		game.deployUnit(state, c.id, 'missionary', stall.x, stall.y);
-		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +1\n- 1 armoury +3\n- 2 missionaries -2');
+		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +0\n- 1 armoury +2\n- 2 missionaries -2');
 		// a stall produces 1, so the second missionary blocks nothing
 		expect(game.overviewText(state, b.id, 'gold', 'production')).toBe('Produced +0\n- 1 stall +1\n- 1 missionary -1');
 	});
@@ -424,6 +515,7 @@ describe('army and spy', () => {
 	test('an inquisitor blocks like a missionary, or removes all missionaries and inquisitors, also your own', () => {
 		const { state, order } = threePlayers();
 		const [a, b, c] = order;
+		unlockBasicUnits(state, ['shrine'], a, c);
 		const armoury = { x: b.center.x + 1, y: b.center.y };
 		const stall = { x: b.center.x - 1, y: b.center.y };
 		state.buildings.push({ id: 'ar', type: 'armoury', ownerId: b.id, ...armoury }, { id: 'st', type: 'stall', ownerId: b.id, ...stall });
@@ -431,7 +523,7 @@ describe('army and spy', () => {
 		game.buyUnit(state, a.id, 'missionary');
 		game.deployUnit(state, a.id, 'inquisitor', armoury.x, armoury.y);
 		game.deployUnit(state, a.id, 'missionary', stall.x, stall.y);
-		expect(game.resourceProduction(state, b.id, 'materials')).toBe(2);
+		expect(game.resourceProduction(state, b.id, 'materials')).toBe(1);
 		game.endTurn(state, a.id, 0);
 		expect(game.unitTargets(state, b.id, 'inquisitor').has(`${armoury.x},${armoury.y}`)).toBe(true); // also on your own building
 		expect(game.unitTargets(state, b.id, 'missionary').has(`${armoury.x},${armoury.y}`)).toBe(false);
@@ -456,13 +548,29 @@ describe('army and spy', () => {
 		expect(game.overviewText(state, b.id, 'knowledge', 'production')).toBe('Produced +1\n- Bologna +1');
 	});
 
+	test('armies, traders and missionaries need a building of their resource, also when it is spied on', () => {
+		const { state, order } = threePlayers();
+		const [a, b] = order;
+		expect(['army', 'trader', 'missionary'].map((u) => game.isUnitUnlocked(state, a, u))).toEqual([false, false, false]);
+		expect(() => game.buyUnit(state, a.id, 'army')).toThrow('You need a materials building to buy a army');
+		unlockBasicUnits(state, ['blacksmith'], a);
+		state.units = [{ id: 's', type: 'spy', ownerId: b.id, x: a.center.x - 1, y: a.center.y - 1 }];
+		expect(game.isUnitUnlocked(state, a, 'army')).toBe(true);
+		expect(game.isUnitUnlocked(state, a, 'trader')).toBe(false);
+		a.unlockedTechnologies = [];
+		expect(game.isUnitUnlocked(state, a, 'spy')).toBe(false); // needs Cryptography
+		expect(game.unitUnlockText('spy')).toBe('Cryptography');
+		expect(game.unitUnlockText('mercenary')).toBe('Mercenary warfare');
+	});
+
 	test('a trader trades 2 of your resources for 1 of an opponent, and is used up', () => {
 		const { state, order } = threePlayers();
 		const [a, b] = order;
-		a.resources.gold = 3;
+		unlockBasicUnits(state, ...order);
+		a.resources.gold = 2;
 		a.resources.faith = 1;
 		b.resources.power = 1;
-		expect(game.unitTargets(state, a.id, 'trader')).toEqual(new Set([`${b.center.x},${b.center.y}`, `${order[2].center.x},${order[2].center.y}`]));
+		expect(game.traderTargets(state, a.id)).toEqual(new Set([b.id, order[2].id]));
 		expect(() => game.trade(state, a.id, b.id, ['gold', 'faith'], ['power'])).toThrow(); // no trader yet
 		game.buyUnit(state, a.id, 'trader');
 		expect(a.resources.gold).toBe(1);
@@ -477,49 +585,22 @@ describe('army and spy', () => {
 		expect(state.log.at(-1)?.text).toEndWith(' trades 1 gold and 1 faith for 1 power');
 	});
 
-	test('a unit stays on its cell when the building is upgraded', () => {
-		const { state, order } = threePlayers();
-		const [a, b] = order;
-		const farm = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
-		game.buyUnit(state, a.id, 'army');
-		game.deployUnit(state, a.id, 'army', farm.x, farm.y);
-		farm.type = 'estate';
-		expect(game.peopleCap(state, b.id)).toBe(1);
-	});
 });
 
-describe('upgrades', () => {
-	test('a better building replaces your building one level lower', () => {
+describe('any level', () => {
+	test('a building of any level is placed directly', () => {
 		const state = startedGame(2);
 		game.finishBorn(state, 0);
 		const player = state.players[state.turnIndex];
-		const other = state.players.find((p) => p !== player)!;
 		const { x, y } = player.center;
-		state.buildings = [
-			{ id: 'a', type: 'shrine', ownerId: player.id, x: x + 1, y },
-			{ id: 'b', type: 'blacksmith', ownerId: player.id, x: x - 1, y },
-			{ id: 'c', type: 'shrine', ownerId: other.id, x: other.center.x + 1, y: other.center.y }
-		];
-		expect([...game.validCells(state, player.id, 'chapel')]).toEqual([`${x + 1},${y}`]);
 		expect(game.hasPlaceFor(state, player.id, 'chapel')).toBe(true);
-		expect(game.hasPlaceFor(state, player.id, 'church')).toBe(false);
-
+		expect(game.validCells(state, player.id, 'cathedral').has(`${x + 1},${y}`)).toBe(true);
 		player.people = 3;
-		player.resources.faith = 3;
+		player.resources.faith = 2;
+		const before = state.buildings.length;
 		game.build(state, player.id, 'chapel', x + 1, y);
-		expect(state.buildings.filter((b) => b.ownerId === player.id).map((b) => b.type).sort()).toEqual(['blacksmith', 'chapel']);
-		expect(game.resourceCap(state, player.id, 'faith')).toBe(9);
-	});
-
-	test('an estate replaces a farm', () => {
-		const state = startedGame(1);
-		game.finishBorn(state, 0);
-		const player = state.players[0];
-		const farms = state.buildings.filter((b) => b.type === 'farm');
-		expect(game.validCells(state, player.id, 'estate')).toEqual(new Set(farms.map((f) => `${f.x},${f.y}`)));
-		player.people = 5;
-		game.build(state, player.id, 'estate', farms[0].x, farms[0].y);
-		expect(game.peopleCap(state, player.id)).toBe(5);
+		expect(state.buildings).toHaveLength(before + 1);
+		expect(game.resourceCap(state, player.id, 'faith')).toBe(5);
 	});
 });
 
@@ -562,6 +643,10 @@ describe('auctions', () => {
 		game.placeBid(state, first, 2);
 		game.placeBid(state, second, 1, 2);
 		expect(game.bidTotal(state, second)).toBe(3);
+		expect(state.auction!.history).toEqual([
+			{ playerId: first, amount: 2, culture: 0, total: 2 },
+			{ playerId: second, amount: 1, culture: 2, total: 3 }
+		]);
 		expect(() => game.placeBid(state, second, 2, 1)).toThrow();
 		expect(() => game.placeBid(state, second, 1, 6)).toThrow();
 		game.doneBidding(state, first, 0);
@@ -618,14 +703,21 @@ describe('objectives', () => {
 		return { state, player: state.players[0] };
 	};
 
-	test('the 2 highest building levels count, F&E do not', () => {
+	test('the highest levels of the 2 best resources count, F&E do not', () => {
 		const { state, player } = objectiveGame();
 		const add = (type: string, x: number) => state.buildings.push({ id: type + x, type, ownerId: player.id, x, y: 0 });
 		add('estate', 0);
 		add('blacksmith', 1);
 		add('armoury', 2);
 		add('barracks', 3);
+		expect(game.objectiveProgress(state, player.id, 0)).toBe(3 / 8); // all materials
+		add('shop', 4);
 		expect(game.objectiveProgress(state, player.id, 0)).toBe(5 / 8);
+		add('factory', 5);
+		add('factory', 6);
+		expect(game.objectiveProgress(state, player.id, 0)).toBe(6 / 8); // 2 factories are not 2 different ones
+		add('bank', 7);
+		expect(game.objectiveProgress(state, player.id, 0)).toBe(1);
 	});
 
 	test('people, armies in stock, deployed inquisitors and different talents count', () => {
@@ -634,27 +726,36 @@ describe('objectives', () => {
 		player.talents = ['artist', 'artist', 'scientist'];
 		player.undeployedUnits = ['army', 'army', 'mercenary', 'inquisitor'];
 		state.units.push({ id: 'i', type: 'inquisitor', ownerId: player.id, x: 0, y: 0 });
-		expect(game.objectiveProgress(state, player.id, 1)).toBe(11 / 50);
+		expect(game.objectiveProgress(state, player.id, 1)).toBe(11 / 25);
 		expect(game.objectiveProgress(state, player.id, 2)).toBe(2 / 20); // mercenaries do not count
 		expect(game.objectiveOverview(state, 2)).toBe('anna has 2/20 armies');
 		expect(game.objectiveProgress(state, player.id, 4)).toBe(1 / 10); // only the one on the board
 		expect(game.objectiveProgress(state, player.id, 5)).toBe(2 / 6);
+		// the counter goes above the goal, the progress stays full
+		player.undeployedUnits = Array(25).fill('army');
+		expect(game.objectiveOverview(state, 2)).toBe('anna has 25/20 armies');
+		expect(game.objectiveProgress(state, player.id, 2)).toBe(1);
+		for (let i = 0; i < 11; i++) state.units.push({ id: 'i' + i, type: 'inquisitor', ownerId: player.id, x: i + 1, y: 0 });
+		expect(game.objectiveOverview(state, 4)).toBe('anna has 12/10 inquisitors');
+		expect(game.objectiveProgress(state, player.id, 4)).toBe(1);
 	});
 
-	test('the 2 highest technology levels and policy levels in effect count', () => {
+	test('the highest technology level counts, and whether Centralization is in effect', () => {
 		const { state, player } = objectiveGame();
 		player.unlockedTechnologies = ['Cryptography', 'Tradecraft', 'Counter intelligence', 'Coinage'];
 		player.unlockedPolicies = ['War machine', 'Subsidies', 'Isolationism'];
 		player.policiesInEffect = ['Subsidies', 'Isolationism'];
-		expect(game.objectiveProgress(state, player.id, 6)).toBe(4 / 8); // 3 + 1, one per column
-		expect(game.objectiveProgress(state, player.id, 7)).toBe(4 / 6); // 2 + 2, War machine is not in effect
+		expect(game.objectiveProgress(state, player.id, 6)).toBe(3 / 4); // Counter intelligence
+		expect(game.objectiveProgress(state, player.id, 7)).toBe(0);
+		player.policiesInEffect = ['Subsidies', 'Centralization'];
+		expect(game.objectiveProgress(state, player.id, 7)).toBe(1);
 	});
 
 	test('the resources received through trade count until the next generation', () => {
 		const { state, a, b } = twoPlayers();
 		a.undeployedUnits = ['trader'];
 		game.trade(state, a.id, b.id, ['gold', 'gold'], ['faith']);
-		expect(game.objectiveProgress(state, a.id, 3)).toBe(1 / 40);
+		expect(game.objectiveProgress(state, a.id, 3)).toBe(1 / 30);
 		game.beginGeneration(state);
 		expect(game.objectiveProgress(state, a.id, 3)).toBe(0);
 	});
@@ -722,34 +823,34 @@ describe('policies', () => {
 		const { state, a } = twoPlayers();
 		expect(() => game.implementPolicy(state, a.id, 'Defensive strategies', 0)).toThrow(); // not unlocked yet
 		game.unlockPolicy(state, a.id, 'Defensive strategies');
-		expect(a.resources.materials).toBe(4);
-		expect(a.resources.power).toBe(34);
+		expect(a.resources.materials).toBe(7);
+		expect(a.resources.power).toBe(37);
 		game.implementPolicy(state, a.id, 'Defensive strategies', 0);
-		expect(a.resources.power).toBe(34);
+		expect(a.resources.power).toBe(37);
 		game.removePolicy(state, a.id, 'Defensive strategies');
-		expect(a.resources.power).toBe(31);
+		expect(a.resources.power).toBe(34);
 		expect(a.policiesInEffect).toEqual([null, null, null]);
 	});
 
-	test('Courtyard gardens adds 4 to the people cap, also without city centre production', () => {
+	test('Courtyard gardens adds 5 to the people cap, also without city centre production', () => {
 		const { state, a } = twoPlayers();
 		expect(state.isCityCentreEnabled).toBe(false);
 		expect(game.peopleCap(state, a.id)).toBe(2); // the 2 starting farms
 		a.unlockedPolicies = ['Courtyard gardens'];
 		game.implementPolicy(state, a.id, 'Courtyard gardens', 0);
-		expect(game.peopleCap(state, a.id)).toBe(6);
-		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- Courtyard gardens +4');
+		expect(game.peopleCap(state, a.id)).toBe(7);
+		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- Courtyard gardens +5');
 	});
 
-	test('Grain reserves keeps the people cap at least 12, also when armies block the farms', () => {
+	test('Grain reserves keeps the people cap at least 10, also when armies block the farms', () => {
 		const { state, a, b } = twoPlayers();
 		const farms = state.buildings.filter((x) => x.ownerId === a.id);
 		farms.forEach((farm, i) => state.units.push({ id: `army${i}`, type: 'army', ownerId: b.id, x: farm.x, y: farm.y }));
 		expect(game.peopleCap(state, a.id)).toBe(0);
 		a.unlockedPolicies = ['Grain reserves'];
 		game.implementPolicy(state, a.id, 'Grain reserves', 0);
-		expect(game.peopleCap(state, a.id)).toBe(12);
-		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- Grain reserves +12');
+		expect(game.peopleCap(state, a.id)).toBe(10);
+		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- Grain reserves +10');
 	});
 
 	test('Agrarian reform adds 1 to each farm and estate, which an army blocks too', () => {
@@ -764,7 +865,7 @@ describe('policies', () => {
 
 	test('a policy can cost people', () => {
 		const { state, a } = twoPlayers();
-		a.resources = { materials: 8, gold: 0, faith: 0, culture: 8, knowledge: 8, power: 8 };
+		a.resources = { materials: 4, gold: 0, faith: 0, culture: 4, knowledge: 4, power: 4 };
 		game.unlockPolicy(state, a.id, 'Grain reserves');
 		expect(a.people).toBe(1);
 		expect(a.resources).toEqual({ materials: 0, gold: 0, faith: 0, culture: 0, knowledge: 0, power: 0 });
@@ -783,26 +884,26 @@ describe('policies', () => {
 
 	test('at most 3 policies are in effect', () => {
 		const { state, a } = twoPlayers();
-		a.unlockedPolicies = ['Defensive strategies', 'Freedom of speech', 'Isolationism', 'Theocracy'];
+		a.unlockedPolicies = ['Defensive strategies', 'Freedom of speech', 'Isolationism', 'Zealots'];
 		a.policiesInEffect = ['Defensive strategies', 'Freedom of speech', 'Isolationism'];
-		expect(() => game.implementPolicy(state, a.id, 'Theocracy', 0)).toThrow();
+		expect(() => game.implementPolicy(state, a.id, 'Zealots', 0)).toThrow();
 	});
 });
 
 describe('technologies', () => {
-	test('a column is unlocked from the bottom up, and each opponent who has it makes it 1 knowledge cheaper', () => {
+	test('a column is unlocked from the top down, and each opponent who has it makes it 1 knowledge cheaper', () => {
 		const { state, a, b } = twoPlayers();
 		expect(() => game.buyUnit(state, a.id, 'spy')).toThrow();
 		expect(() => game.unlockTechnology(state, a.id, 'Tradecraft')).toThrow(); // Cryptography first
 		game.unlockTechnology(state, a.id, 'Cryptography');
-		expect([a.resources.materials, a.resources.knowledge]).toEqual([9, 27]);
+		expect([a.resources.materials, a.resources.knowledge]).toEqual([9, 28]);
 		expect(() => game.unlockTechnology(state, a.id, 'Cryptography')).toThrow(); // already yours
 		game.buyUnit(state, a.id, 'spy');
 		expect(game.technologyCost(state, b.id, 'Cryptography')).toEqual([
 			{ amount: 1, resourceType: 'materials' },
-			{ amount: 2, resourceType: 'knowledge' }
+			{ amount: 1, resourceType: 'knowledge' }
 		]);
-		expect(game.technologyCost(state, b.id, 'Tradecraft')[1].amount).toBe(8);
+		expect(game.technologyCost(state, b.id, 'Tradecraft')[1].amount).toBe(4);
 	});
 
 	test('a level 4 technology also costs the talent of its column', () => {
@@ -818,16 +919,71 @@ describe('technologies', () => {
 		expect(state.peoplePool).toContain('craftsman');
 	});
 
-	test('tradecraft adds what your spies take to your cap, covert operations take the whole cap', () => {
+	test('tradecraft adds what your spies take to your cap', () => {
 		const { state, a, b, blacksmith } = withBuildings();
 		a.unlockedTechnologies = ['Cryptography', 'Tradecraft'];
 		game.buyUnit(state, a.id, 'spy');
 		game.deployUnit(state, a.id, 'spy', blacksmith.x, blacksmith.y);
-		expect(game.overviewText(state, b.id, 'materials', 'cap')).toBe('Cap 8\n- Armoury 9\n- 1 spy -1');
+		expect(game.overviewText(state, b.id, 'materials', 'cap')).toBe('Cap 4\n- Armoury 5\n- 1 spy -1');
 		expect(game.overviewText(state, a.id, 'materials', 'cap')).toBe('Cap 2\n- Standard 1\n- 1 spy +1');
-		a.unlockedTechnologies.push('Counter intelligence', 'Covert operations');
+	});
+
+	test('with covert operations a spied building does not count for the cap, tradecraft still gives you 1', () => {
+		const { state, a, b, blacksmith, armoury } = withBuildings();
+		a.unlockedTechnologies = ['Cryptography', 'Tradecraft', 'Counter intelligence', 'Covert operations'];
+		// on the blacksmith (cap 2), below the armoury that still counts: nothing changes
+		state.units = [{ id: 's', type: 'spy', ownerId: a.id, ...blacksmith }];
 		expect(game.resourceCap(state, b.id, 'materials')).toBe(5);
-		expect(game.resourceCap(state, a.id, 'materials')).toBe(5);
+		expect(game.isLowered(state, b.id, 'materials', 'cap')).toBe(false);
+		expect(game.resourceCap(state, a.id, 'materials')).toBe(2);
+		// on the armoury (cap 5): the blacksmith's 2 is left
+		state.units = [{ id: 's', type: 'spy', ownerId: a.id, ...armoury }];
+		expect(game.resourceCap(state, b.id, 'materials')).toBe(2);
+		expect(game.overviewText(state, b.id, 'materials', 'cap')).toBe('Cap 2\n- Armoury 5\n- 1 spy -3');
+		expect(game.resourceCap(state, a.id, 'materials')).toBe(2);
+		// without another building: 0
+		state.buildings = state.buildings.filter((x) => x.id !== 'bs');
+		expect(game.resourceCap(state, b.id, 'materials')).toBe(0);
+		expect(game.resourceCap(state, a.id, 'materials')).toBe(2);
+	});
+
+	test('covert operations spies of two opponents on both buildings bring the cap to 0, without it 1 each', () => {
+		const state = startedGame(3);
+		game.finishBorn(state, 0);
+		const [a, b, c] = state.players;
+		const bank = { x: b.center.x + 1, y: b.center.y };
+		const shop = { x: b.center.x - 1, y: b.center.y };
+		state.buildings.push({ id: 'bank', type: 'bank', ownerId: b.id, ...bank }, { id: 'shop', type: 'shop', ownerId: b.id, ...shop });
+		state.units = [
+			{ id: 'sa', type: 'spy', ownerId: a.id, ...bank },
+			{ id: 'sc', type: 'spy', ownerId: c.id, ...shop }
+		];
+		for (const p of [a, c]) p.unlockedTechnologies = ['Cryptography', 'Tradecraft'];
+		expect(game.resourceCap(state, b.id, 'gold')).toBe(13); // 15 - 1 - 1
+		for (const p of [a, c]) p.unlockedTechnologies.push('Counter intelligence', 'Covert operations');
+		expect(game.resourceCap(state, b.id, 'gold')).toBe(0);
+		expect(game.overviewText(state, b.id, 'gold', 'cap')).toBe('Cap 0\n- Bank 15\n- 2 spies -15');
+		expect([game.resourceCap(state, a.id, 'gold'), game.resourceCap(state, c.id, 'gold')]).toEqual([2, 2]);
+		// only one with Covert operations: the bank does not count, the shop's 5 is lowered by 1
+		c.unlockedTechnologies = ['Cryptography', 'Tradecraft'];
+		expect(game.resourceCap(state, b.id, 'gold')).toBe(4);
+	});
+
+	test('with defensive strategies your own army guards your farm, until an opponent removes it with theirs', () => {
+		const { state, a, b } = twoPlayers();
+		unlockBasicUnits(state, a, b);
+		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
+		const key = `${farm.x},${farm.y}`;
+		expect(game.unitTargets(state, a.id, 'army').has(key)).toBe(false);
+		a.unlockedPolicies = ['Defensive strategies'];
+		a.policiesInEffect = ['Defensive strategies', null, null];
+		expect(game.unitTargets(state, a.id, 'army').has(key)).toBe(true);
+		const cap = game.peopleCap(state, a.id);
+		game.buyUnit(state, a.id, 'army');
+		game.deployUnit(state, a.id, 'army', farm.x, farm.y);
+		expect(game.peopleCap(state, a.id)).toBe(cap); // your own army lowers nothing
+		expect(game.unitTargets(state, a.id, 'army').has(key)).toBe(false); // already guarded
+		expect(game.unitTargets(state, b.id, 'army').has(key)).toBe(true); // both go when b places theirs
 	});
 
 	test('with counter intelligence your own spy guards your building', () => {
@@ -838,19 +994,20 @@ describe('technologies', () => {
 		b.unlockedTechnologies.push('Tradecraft', 'Counter intelligence');
 		expect(game.unitTargets(state, b.id, 'spy').has(`${armoury.x},${armoury.y}`)).toBe(true);
 		state.units = [{ id: 's', type: 'spy', ownerId: b.id, ...armoury }];
-		expect(game.resourceCap(state, b.id, 'materials')).toBe(9); // your own spy takes nothing
+		expect(game.resourceCap(state, b.id, 'materials')).toBe(5); // your own spy takes nothing
 		expect(game.unitTargets(state, a.id, 'spy').has(`${armoury.x},${armoury.y}`)).toBe(false);
 	});
 
 	test('you trade once with each opponent per turn, unless you have caravans', () => {
 		const { state, a, b } = twoPlayers();
+		unlockBasicUnits(state, a, b);
 		game.buyUnit(state, a.id, 'trader');
 		game.buyUnit(state, a.id, 'trader');
 		game.trade(state, a.id, b.id, ['gold', 'gold'], ['culture']);
 		expect(() => game.trade(state, a.id, b.id, ['gold', 'gold'], ['culture'])).toThrow(game.tradeLimitMessage);
 		a.unlockedTechnologies = ['Coinage', 'Caravans'];
 		game.trade(state, a.id, b.id, ['gold'], ['culture']); // 1 for 1 with Coinage
-		expect([a.resources.gold, a.resources.culture]).toEqual([20 - 4 - 2 - 1, 32]);
+		expect([a.resources.gold, a.resources.culture]).toEqual([20 - 2 - 2 - 1, 32]);
 		expect(a.undeployedUnits).toEqual([]);
 	});
 
@@ -869,6 +1026,7 @@ describe('technologies', () => {
 
 	test('infrastructure trades 1 of yours for 2 of theirs, and the limit starts over each turn', () => {
 		const { state, a, b } = twoPlayers();
+		unlockBasicUnits(state, a, b);
 		a.unlockedTechnologies = ['Coinage', 'Caravans', 'Infrastructure'];
 		game.buyUnit(state, a.id, 'trader');
 		expect(() => game.trade(state, a.id, b.id, ['gold', 'gold'], ['culture'])).toThrow();
@@ -884,8 +1042,8 @@ describe('technologies', () => {
 		a.unlockedTechnologies = ['Inquisition', 'Tithes', 'Persecution', 'Pilgrimage'];
 		game.buyUnit(state, a.id, 'inquisitor');
 		game.deployUnit(state, a.id, 'inquisitor', armoury.x, armoury.y);
-		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +1\n- 1 blacksmith +1\n- 1 armoury +3\n- 1 inquisitor -3');
-		expect(game.overviewText(state, a.id, 'materials', 'production')).toBe('Produced +3\n- 1 inquisitor +3');
+		expect(game.overviewText(state, b.id, 'materials', 'production')).toBe('Produced +1\n- 1 blacksmith +1\n- 1 armoury +2\n- 1 inquisitor -2');
+		expect(game.overviewText(state, a.id, 'materials', 'production')).toBe('Produced +2\n- 1 inquisitor +2');
 	});
 
 	test('with persecution your own inquisitor guards your building', () => {
@@ -894,7 +1052,7 @@ describe('technologies', () => {
 		b.unlockedTechnologies = ['Inquisition', 'Tithes', 'Persecution'];
 		expect(game.unitTargets(state, b.id, 'inquisitor').has(`${armoury.x},${armoury.y}`)).toBe(true);
 		state.units = [{ id: 'i', type: 'inquisitor', ownerId: b.id, ...armoury }];
-		expect(game.resourceProduction(state, b.id, 'materials')).toBe(4); // your own inquisitor reduces nothing
+		expect(game.resourceProduction(state, b.id, 'materials')).toBe(3); // your own inquisitor reduces nothing
 		expect(game.unitTargets(state, a.id, 'inquisitor').has(`${armoury.x},${armoury.y}`)).toBe(false);
 		expect(game.unitTargets(state, a.id, 'missionary').has(`${armoury.x},${armoury.y}`)).toBe(false);
 	});
@@ -906,18 +1064,6 @@ describe('technologies', () => {
 		expect(game.resourceProduction(state, a.id, 'gold')).toBe(0);
 		state.stats.nrOfGenerations += 2;
 		expect(game.overviewText(state, a.id, 'gold', 'production')).toBe('Produced +2\n- Interest +2');
-	});
-
-	test('gothic engineering places level 3 and 4 buildings like level 1, without the building one level lower', () => {
-		const { state, a } = twoPlayers();
-		const cell = `${a.center.x + 1},${a.center.y}`;
-		expect(game.hasPlaceFor(state, a.id, 'barracks')).toBe(false);
-		a.unlockedTechnologies = ['Propaganda posters', 'Reeducation programs', 'Fresco paintings', 'Gothic engineering'];
-		expect(game.hasPlaceFor(state, a.id, 'barracks')).toBe(true);
-		expect(game.validCells(state, a.id, 'factory').has(cell)).toBe(true);
-		expect(game.validCells(state, a.id, 'armoury').size).toBe(0); // level 2 still needs a blacksmith
-		state.buildings.push({ id: 'ar', type: 'armoury', ownerId: a.id, x: a.center.x - 1, y: a.center.y });
-		expect(game.validCells(state, a.id, 'barracks').has(`${a.center.x - 1},${a.center.y}`)).toBe(true); // the upgrade still works
 	});
 
 	test('retraining, indoctrination and propaganda cost culture', () => {
@@ -934,24 +1080,18 @@ describe('technologies', () => {
 		game.propaganda(state, a.id, b.id);
 		expect(a.people).toBe(6);
 		expect(b.people).toBe(4);
-		expect(a.resources.culture).toBe(30 - 8 - 12 - 3);
+		expect(a.resources.culture).toBe(30 - 7 - 9 - 3);
 		expect(b.resources.culture).toBe(30);
 	});
-});
 
-describe('building limit', () => {
-	test('only 1 building of each type, farms and estates excepted', () => {
-		const { state, a } = twoPlayers();
-		state.isBuildingLimitEnabled = true;
-		game.build(state, a.id, 'blacksmith', a.center.x + 1, a.center.y);
-		expect(game.hasPlaceFor(state, a.id, 'blacksmith')).toBe(false);
-		expect(game.validCells(state, a.id, 'blacksmith').size).toBe(0);
-		expect(() => game.build(state, a.id, 'blacksmith', a.center.x - 1, a.center.y)).toThrow();
-		expect(game.hasPlaceFor(state, a.id, 'stall')).toBe(true);
-		expect(game.hasPlaceFor(state, a.id, 'farm')).toBe(true);
-		// an armoury replaces the blacksmith, so another blacksmith fits again
-		game.build(state, a.id, 'armoury', a.center.x + 1, a.center.y);
-		expect(game.hasPlaceFor(state, a.id, 'blacksmith')).toBe(true);
+	test('with Subsidies in effect your people cannot be won over', () => {
+		const { state, a, b } = twoPlayers();
+		b.talents = ['artist'];
+		a.unlockedTechnologies = ['Propaganda posters', 'Fresco paintings'];
+		b.policiesInEffect = ['Subsidies'];
+		expect(() => game.propaganda(state, a.id, b.id)).toThrow();
+		expect(() => game.indoctrinate(state, a.id, b.id, 0)).toThrow();
+		expect(b.talents).toEqual(['artist']);
 	});
 });
 
@@ -963,7 +1103,7 @@ describe('test mode', () => {
 		a.resources = { materials: 0, gold: 0, faith: 0, culture: 0, knowledge: 0, power: 0 };
 		expect(game.canPay(state, a, game.getUnitStats('army').cost)).toBe(true);
 		game.build(state, a.id, 'blacksmith', a.center.x + 1, a.center.y);
-		game.build(state, a.id, 'armoury', a.center.x + 1, a.center.y);
+		game.build(state, a.id, 'armoury', a.center.x - 1, a.center.y);
 		game.buyUnit(state, a.id, 'army');
 		game.unlockTechnology(state, a.id, 'Cryptography');
 		game.unlockPolicy(state, a.id, 'Defensive strategies');
@@ -975,6 +1115,16 @@ describe('test mode', () => {
 });
 
 describe('test mode start', () => {
+	test('a test game can start below the minimum player count', () => {
+		const state = game.createGameState({ ...settings, minPlayerCount: 3, isTestMode: true }, 'g1', null);
+		const player = game.addPlayer(state);
+		game.updatePlayer(state, player.id, { name: 'player1', color: 'red' });
+		game.setReady(state, player.id, true);
+		expect(game.canStart(state)).toBe(true);
+		state.isTestMode = false;
+		expect(game.canStart(state)).toBe(false);
+	});
+
 	test('no farms, all technologies and policies unlocked', () => {
 		const state = game.createGameState({ ...settings, isTestMode: true }, 'g1', null);
 		const player = game.addPlayer(state);
@@ -991,14 +1141,14 @@ describe('test mode start', () => {
 describe('mercenary warfare', () => {
 	test('mercenaries can be bought while the policy is in effect', () => {
 		const { state, a } = twoPlayers();
-		expect(game.isUnitUnlocked(a, 'mercenary')).toBe(false);
+		expect(game.isUnitUnlocked(state, a, 'mercenary')).toBe(false);
 		game.unlockPolicy(state, a.id, 'Mercenary warfare');
 		expect(() => game.buyUnit(state, a.id, 'mercenary')).toThrow(); // unlocked, not in effect yet
 		game.implementPolicy(state, a.id, 'Mercenary warfare', 0);
 		game.buyUnit(state, a.id, 'mercenary');
 		expect(a.undeployedUnits).toEqual(['mercenary']);
 		game.removePolicy(state, a.id, 'Mercenary warfare');
-		expect(game.isUnitUnlocked(a, 'mercenary')).toBe(false);
+		expect(game.isUnitUnlocked(state, a, 'mercenary')).toBe(false);
 		expect(a.undeployedUnits).toEqual(['mercenary']); // stays in stock
 	});
 });
@@ -1012,14 +1162,21 @@ describe('titles', () => {
 		return players;
 	};
 
-	test('a General removing an army with their army keeps it there', () => {
+	test('a General removing an army from their own farm with their army keeps it there, not on an opponent\'s', () => {
 		const { state, a, b } = withTitles({ a: 'General' });
+		unlockBasicUnits(state, a, b);
 		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
 		state.units.push({ id: 'b-army', type: 'army', ownerId: b.id, x: farm.x, y: farm.y });
 		game.buyUnit(state, a.id, 'army');
 		game.deployUnit(state, a.id, 'army', farm.x, farm.y);
 		expect(state.units.map((u) => u.ownerId)).toEqual([a.id]);
 		expect(game.peopleCap(state, a.id)).toBe(2); // your own army blocks nothing of yours
+		// on an opponent's farm (here their own army, with Defensive strategies) both go, as usual
+		const theirs = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
+		state.units.push({ id: 'b-guard', type: 'army', ownerId: b.id, x: theirs.x, y: theirs.y });
+		game.buyUnit(state, a.id, 'army');
+		game.deployUnit(state, a.id, 'army', theirs.x, theirs.y);
+		expect(state.units.filter((u) => u.x === theirs.x && u.y === theirs.y)).toHaveLength(0);
 	});
 
 	test('a Podestà gets 1 gold for each unspent person when a generation begins, within the gold cap', () => {
@@ -1027,13 +1184,47 @@ describe('titles', () => {
 		state.buildings.push({ id: 'st', type: 'stall', ownerId: a.id, x: a.center.x + 1, y: a.center.y });
 		a.resources.gold = 0;
 		game.beginGeneration(state);
-		expect(a.resources.gold).toBe(4); // 5 people, but the cap is 4
+		expect(a.resources.gold).toBe(2); // 5 people, but the cap is 2
 	});
 
-	test("a Bishop's missionaries cost 1 fewer faith", () => {
-		const { state, a, b } = withTitles({ a: 'Bishop' });
+	test('with Zealots a missionary costs 1 person and 1 faith', () => {
+		const { state, a, b } = withBuildings();
+		a.unlockedPolicies = ['Zealots'];
+		a.policiesInEffect = ['Zealots', null, null];
 		expect(game.unitCost(state, a, 'missionary')).toEqual([{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'faith' }]);
 		expect(game.unitCost(state, b, 'missionary')).toEqual(game.getUnitStats('missionary').cost);
+	});
+
+	test('a Bishop starts with Zealots unlocked and in effect', () => {
+		const state = game.createGameState(settings, 'g1', null);
+		state.enabledCharacteristics.title = true;
+		const [bishop, other] = [0, 1].map((i) => {
+			const player = game.addPlayer(state);
+			player.characteristics.title = i === 0 ? 'Bishop' : 'General';
+			game.updatePlayer(state, player.id, { color: colors[i] });
+			player.isReadyForGame = true;
+			return player;
+		});
+		game.startGame(state);
+		expect(bishop.unlockedPolicies).toEqual(['Zealots']);
+		expect(bishop.policiesInEffect).toEqual(['Zealots', null, null]);
+		expect(other.policiesInEffect).toEqual([]);
+		expect(game.unitCost(state, bishop, 'missionary')).toEqual([{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'faith' }]);
+	});
+
+	test("with Freedom of speech opponents' missionaries can't be put on your buildings, the ones there stay and inquisitors still can", () => {
+		const { state, a, b } = withBuildings();
+		const shop = { id: 'sh', type: 'shop', ownerId: b.id, x: b.center.x + 1, y: b.center.y };
+		state.buildings.push(shop);
+		a.unlockedTechnologies = ['Inquisition'];
+		const key = `${shop.x},${shop.y}`;
+		expect(game.unitTargets(state, a.id, 'missionary').has(key)).toBe(true);
+		b.unlockedPolicies = ['Freedom of speech'];
+		b.policiesInEffect = ['Freedom of speech', null, null];
+		expect(game.unitTargets(state, a.id, 'missionary').has(key)).toBe(false);
+		expect(game.unitTargets(state, a.id, 'inquisitor').has(key)).toBe(true);
+		state.units.push({ id: 'm', type: 'missionary', ownerId: a.id, x: shop.x, y: shop.y });
+		expect(game.resourceProduction(state, b.id, 'gold')).toBe(1); // still blocks 1
 	});
 
 	test("a Patron's culture counts 2 in bids", () => {
@@ -1045,8 +1236,8 @@ describe('titles', () => {
 		const player = { id: 'p', people: 0, talents: ['messiah', 'craftsman'] as Talent[], resources: { materials: 0, gold: 0, faith: 0, culture: 0, knowledge: 0, power: 0 } };
 		const cost = [{ amount: 1, resourceType: 'scientist' as const }];
 		expect(game.talentPayment(player, cost)).toBeNull();
-		expect(game.talentPayment(player, cost, true)).toEqual({ required: ['messiah'], choices: 0, options: ['craftsman'] });
-		expect(game.talentPayment(player, [{ amount: 1, resourceType: 'merchant' as const }], true)).toBeNull(); // the craftsman has no group
+		expect(game.talentPayment(player, cost, { substitutes: true })).toEqual({ required: ['messiah'], choices: 0, options: ['craftsman'] });
+		expect(game.talentPayment(player, [{ amount: 1, resourceType: 'merchant' as const }], { substitutes: true })).toBeNull(); // the craftsman has no group
 	});
 
 	test("a Dictator's buildings are no target for missionaries, nor for spies without Covert operations", () => {
@@ -1057,5 +1248,255 @@ describe('titles', () => {
 		expect(game.unitTargets(state, a.id, 'inquisitor').has(cell)).toBe(true);
 		a.unlockedTechnologies = ['Cryptography', 'Tradecraft', 'Counter intelligence', 'Covert operations'];
 		expect(game.unitTargets(state, a.id, 'spy').has(cell)).toBe(true);
+	});
+});
+
+describe('religious dominance', () => {
+	// b has a building on all 8 cells inside the wall, a has a missionary on 7 of them
+	const dominance = () => {
+		const players = twoPlayers();
+		const { state, a, b } = players;
+		state.isReligiousDominanceEnabled = true;
+		const cells = [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => ({ x: b.center.x + dx, y: b.center.y + dy }))).filter((c) => c.x !== b.center.x || c.y !== b.center.y);
+		cells.forEach((c, i) => state.buildings.push({ id: `s${i}`, type: 'shrine', ownerId: b.id, ...c }));
+		cells.slice(0, 7).forEach((c, i) => state.units.push({ id: `m${i}`, type: 'missionary', ownerId: a.id, ...c }));
+		a.undeployedUnits = ['missionary', 'missionary'];
+		return { ...players, last: cells[7], centre: `${b.center.x},${b.center.y}` };
+	};
+
+	test('a missionary on all 8 buildings inside the wall opens the city centre, which gives dominance', () => {
+		const { state, a, b, last, centre } = dominance();
+		expect(game.religiousDominanceProgress(state, a.id)).toBe(7 / 9);
+		expect(game.unitTargets(state, a.id, 'missionary').has(centre)).toBe(false);
+		game.deployUnit(state, a.id, 'missionary', last.x, last.y);
+		expect(game.religiousDominanceProgress(state, a.id)).toBe(8 / 9);
+		expect(game.hasReligiousDominance(state, a.id, b.id)).toBe(false);
+		expect(game.unitTargets(state, a.id, 'missionary').has(centre)).toBe(true);
+		game.deployUnit(state, a.id, 'missionary', b.center.x, b.center.y);
+		expect(game.hasReligiousDominance(state, a.id, b.id)).toBe(true);
+		expect(game.religiousDominanceOverview(state)).toContain(`${a.name} converted 8 buildings and 1 city centre`);
+		expect(game.unitTargets(state, b.id, 'missionary').has(`${a.center.x},${a.center.y}`)).toBe(false);
+	});
+
+	test('the missionary on the city centre keeps dominance for good', () => {
+		const { state, a, b, last, centre } = dominance();
+		game.deployUnit(state, a.id, 'missionary', last.x, last.y);
+		game.deployUnit(state, a.id, 'missionary', b.center.x, b.center.y);
+		expect(game.unitTargets(state, a.id, 'missionary').has(centre)).toBe(false); // one per player
+		state.units = state.units.filter((u) => u.x !== last.x || u.y !== last.y);
+		expect(game.hasReligiousDominance(state, a.id, b.id)).toBe(true);
+		// nothing on the city centre can be targeted or bribed away
+		expect(game.unitTargets(state, b.id, 'inquisitor').has(centre)).toBe(false);
+		const unit = state.units.find((u) => u.x === b.center.x && u.y === b.center.y)!;
+		b.policiesInEffect = ['Ambassador bribes', null, null];
+		expect(() => game.bribe(state, b.id, unit.id)).toThrow();
+	});
+
+	test('dominance over all opponents wins at the end of phase two, only when enabled', () => {
+		const { state, a, b, last } = dominance();
+		game.deployUnit(state, a.id, 'missionary', last.x, last.y);
+		expect(game.checkObjectives(state)).toBe(false); // the 8 buildings alone are not enough
+		game.deployUnit(state, a.id, 'missionary', b.center.x, b.center.y);
+		expect(game.checkObjectives(state)).toBe(true);
+		expect(state.winnerIds).toEqual([a.id]);
+
+		const other = dominance();
+		other.state.isReligiousDominanceEnabled = false;
+		other.state.units.push({ id: 'm7', type: 'missionary', ownerId: other.a.id, ...other.last });
+		other.state.units.push({ id: 'mc', type: 'missionary', ownerId: other.a.id, ...other.b.center });
+		expect(game.checkObjectives(other.state)).toBe(false);
+	});
+});
+
+describe('the policies at work', () => {
+	const put = (player: GameState['players'][number], name: string) => {
+		player.unlockedPolicies = [...(player.unlockedPolicies ?? []), name];
+		player.policiesInEffect = [name, null, null];
+	};
+
+	test('War machine: an army costs 1 person and 1 materials, a mercenary the same as before', () => {
+		const { state, a } = twoPlayers();
+		put(a, 'War machine');
+		expect(game.unitCost(state, a, 'army')).toEqual([{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'materials' }]);
+		expect(game.unitCost(state, a, 'mercenary')).toEqual(game.getUnitStats('mercenary').cost);
+	});
+
+	test('Centralized logistics: the cap your army blocks is added to yours', () => {
+		const { state, a, b } = twoPlayers();
+		const farm = state.buildings.find((x) => x.ownerId === b.id && x.type === 'farm')!;
+		state.units.push({ id: 'u', type: 'army', ownerId: a.id, x: farm.x, y: farm.y });
+		const before = game.peopleCap(state, a.id);
+		put(a, 'Centralized logistics');
+		expect(game.peopleCap(state, a.id)).toBe(before + 1);
+		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- 1 army +1');
+	});
+
+	test('Ambassador bribes: each unit has its own price, inquisitors can be bribed too', () => {
+		const { state, a, b } = twoPlayers();
+		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
+		state.buildings.push({ id: 'sh', type: 'shop', ownerId: a.id, x: a.center.x + 1, y: a.center.y });
+		state.units.push({ id: 'm', type: 'mercenary', ownerId: b.id, x: farm.x, y: farm.y }, { id: 'i', type: 'inquisitor', ownerId: b.id, x: a.center.x + 1, y: a.center.y });
+		put(a, 'Ambassador bribes');
+		a.resources.gold = 11;
+		game.bribe(state, a.id, 'm');
+		expect(a.resources.gold).toBe(8);
+		game.bribe(state, a.id, 'i');
+		expect(a.resources.gold).toBe(0);
+		expect(state.units).toHaveLength(0);
+	});
+
+	test('Tax reformation: once a generation is born, opponents pay 1 gold per unit inside your wall, or the unit returns; armies pay nothing', () => {
+		const { state, a, b } = twoPlayers();
+		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
+		const cells = [-1, 1].map((dx) => ({ x: a.center.x + dx, y: a.center.y }));
+		cells.forEach((cell, i) => state.buildings.push({ id: `b${i}`, type: 'shop', ownerId: a.id, ...cell }));
+		state.units.push(
+			{ id: 'army', type: 'army', ownerId: b.id, x: farm.x, y: farm.y },
+			...cells.map((cell, i) => ({ id: `spy${i}`, type: 'spy' as const, ownerId: b.id, ...cell }))
+		);
+		put(a, 'Tax reformation');
+		a.resources.gold = 0;
+		b.resources.gold = 1;
+		b.undeployedUnits = [];
+		game.beginGeneration(state);
+		expect(a.resources.gold).toBe(1);
+		expect(b.resources.gold).toBe(0);
+		expect(state.units.map((u) => u.id)).toEqual(['army', 'spy0']);
+		expect(b.undeployedUnits).toEqual(['spy']);
+	});
+
+	test('Tax reformation: inquisitors are paid for first, then spies and missionaries', () => {
+		const { state, a, b } = twoPlayers();
+		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
+		const cells = [-1, 0, 1].map((dx) => ({ x: a.center.x + dx, y: a.center.y - 1 }));
+		cells.forEach((cell, i) => state.buildings.push({ id: `b${i}`, type: 'shop', ownerId: a.id, ...cell }));
+		state.units.push(
+			{ id: 'army', type: 'army', ownerId: b.id, x: farm.x, y: farm.y },
+			{ id: 'inquisitor', type: 'inquisitor', ownerId: b.id, ...cells[0] },
+			{ id: 'spy', type: 'spy', ownerId: b.id, ...cells[1] },
+			{ id: 'missionary', type: 'missionary', ownerId: b.id, ...cells[2] }
+		);
+		put(a, 'Tax reformation');
+		b.resources.gold = 2;
+		b.undeployedUnits = [];
+		game.beginGeneration(state);
+		expect(state.units.map((u) => u.id).sort()).toEqual(['army', 'inquisitor', 'spy']);
+		expect(b.undeployedUnits).toEqual(['missionary']);
+	});
+
+	test("Holy sacraments: 1 faith for each opponent's missionary and inquisitor on your buildings", () => {
+		const { state, a, b } = twoPlayers();
+		const cells = [a.center.x + 1, a.center.x - 1].map((x) => ({ x, y: a.center.y }));
+		state.buildings.push({ id: 'sh', type: 'shrine', ownerId: a.id, ...cells[0] }, { id: 'st', type: 'stall', ownerId: a.id, ...cells[1] });
+		state.units.push({ id: 'm', type: 'missionary', ownerId: b.id, ...cells[0] }, { id: 'i', type: 'inquisitor', ownerId: b.id, ...cells[1] });
+		const before = game.resourceProduction(state, a.id, 'faith');
+		put(a, 'Holy sacraments');
+		expect(game.resourceProduction(state, a.id, 'faith')).toBe(before + 2);
+	});
+
+	test("Work ethic: when the regular people can't pay a building, 1 talent pays all of its people", () => {
+		const { state, a } = twoPlayers();
+		a.people = 1;
+		a.talents = ['craftsman', 'artist', 'scientist'];
+		a.resources.materials = 4;
+		put(a, 'Work ethic');
+		game.build(state, a.id, 'barracks', a.center.x + 1, a.center.y, ['artist']);
+		expect(a.people).toBe(1); // the regular person is not spent
+		expect(a.talents).toEqual(['scientist']);
+		// when the regular people can pay, they do
+		a.people = 2;
+		a.resources.materials = 2;
+		game.build(state, a.id, 'armoury', a.center.x - 1, a.center.y);
+		expect(a.people).toBe(0);
+		expect(a.talents).toEqual(['scientist']);
+		// units cost the same as before
+		expect(game.canPay(state, a, game.unitCost(state, a, 'trader'))).toBe(true);
+		a.talents = [];
+		expect(game.canPay(state, a, game.unitCost(state, a, 'trader'))).toBe(false);
+	});
+
+	test('Bread and circuses: each upcoming generation 1 people cap per opponent without an opera house', () => {
+		const { state, a, b } = twoPlayers();
+		const [capA, capB] = [game.peopleCap(state, a.id), game.peopleCap(state, b.id)];
+		a.unlockedPolicies = ['Bread and circuses'];
+		game.implementPolicy(state, a.id, 'Bread and circuses', 0);
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA, capB]); // from the next generation
+		state.stats.nrOfGenerations += 1;
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA + 1, capB - 1]);
+		expect(game.overviewText(state, a.id, 'people', 'cap')).toContain('- Bread and circuses +1');
+		expect(game.overviewText(state, b.id, 'people', 'cap')).toContain(`- Bread and circuses of ${a.name} -1`);
+		state.stats.nrOfGenerations += 5;
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA + 6, 0]); // never below 0
+		// an opera house reverts it for that opponent
+		state.buildings.push({ id: 'oh', type: 'opera house', ownerId: b.id, x: b.center.x + 1, y: b.center.y });
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA, capB]);
+		state.buildings.pop();
+		// removing it reverts all of it, implementing it again starts at 0
+		game.removePolicy(state, a.id, 'Bread and circuses');
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA, capB]);
+		game.implementPolicy(state, a.id, 'Bread and circuses', 1);
+		expect([game.peopleCap(state, a.id), game.peopleCap(state, b.id)]).toEqual([capA, capB]);
+	});
+
+	test('Espionage: a technology an opponent has costs no knowledge', () => {
+		const { state, a, b } = twoPlayers();
+		b.unlockedTechnologies = ['Cryptography'];
+		const knowledge = (name: string) => game.technologyCost(state, a.id, name).find((c) => c.resourceType === 'knowledge')!.amount;
+		expect(knowledge('Cryptography')).toBe(1);
+		expect(() => game.unlockPolicy(state, a.id, 'Espionage')).toThrow(); // needs Tradecraft
+		a.unlockedTechnologies = ['Cryptography', 'Tradecraft'];
+		game.unlockPolicy(state, a.id, 'Espionage');
+		game.implementPolicy(state, a.id, 'Espionage', 0);
+		expect(knowledge('Cryptography')).toBe(0);
+		expect(knowledge('Coinage')).toBe(2);
+	});
+
+	test('Isolationism: nobody trades with you and you trade with nobody', () => {
+		const { state, a, b } = twoPlayers();
+		expect(game.traderTargets(state, a.id).has(b.id)).toBe(true);
+		put(b, 'Isolationism');
+		expect(game.traderTargets(state, a.id).has(b.id)).toBe(false);
+		expect(game.traderTargets(state, b.id).size).toBe(0);
+	});
+
+	test('Centralization: what you lack of a resource is paid with power, never people', () => {
+		const { state, a } = twoPlayers();
+		a.resources.gold = 1;
+		a.resources.power = 5;
+		const shop = game.getBuildingStats('shop').cost;
+		expect(game.canPay(state, a, shop, true)).toBe(false);
+		put(a, 'Centralization');
+		game.build(state, a.id, 'shop', a.center.x + 1, a.center.y);
+		expect([a.resources.gold, a.resources.power]).toEqual([0, 4]);
+		a.people = 0;
+		a.talents = [];
+		expect(game.canPay(state, a, [{ amount: 1, resourceType: 'people' }])).toBe(false);
+		// power the cost asks for itself comes first
+		expect(game.canPay(state, a, [{ amount: 1, resourceType: 'gold' }, { amount: 4, resourceType: 'power' }])).toBe(false);
+		expect(game.canPay(state, a, [{ amount: 1, resourceType: 'gold' }, { amount: 3, resourceType: 'power' }])).toBe(true);
+	});
+
+	test('Centralization also pays bribes, the culture actions and bids', () => {
+		const { state, a, b } = twoPlayers();
+		put(a, 'Centralization');
+		a.unlockedPolicies = ['Centralization', 'Ambassador bribes'];
+		a.policiesInEffect = ['Centralization', 'Ambassador bribes', null];
+		a.unlockedTechnologies = ['Propaganda posters'];
+		// a bribe: 3 gold and 2 power for an army
+		const farm = state.buildings.find((x) => x.ownerId === a.id && x.type === 'farm')!;
+		state.units.push({ id: 'u', type: 'army', ownerId: b.id, x: farm.x, y: farm.y });
+		a.resources.gold = 3;
+		a.resources.power = 10;
+		game.bribe(state, a.id, 'u');
+		expect([a.resources.gold, a.resources.power]).toEqual([0, 8]);
+		// propaganda: 1 culture and 2 power
+		a.resources.culture = 1;
+		game.propaganda(state, a.id, b.id);
+		expect([a.resources.culture, a.resources.power]).toEqual([0, 6]);
+		// a bid of more gold than you have
+		state.phase = 'auction';
+		state.auction = { queue: [], talent: 'merchant', deficits: { [a.id]: 1, [b.id]: 1 }, eligible: [a.id, b.id], bids: { [a.id]: 0, [b.id]: 0 }, cultureBids: {}, done: [], won: { [a.id]: 0, [b.id]: 0 }, regularPeople: 0 };
+		game.placeBid(state, a.id, 4, 0);
+		expect(() => game.placeBid(state, a.id, 7, 0)).toThrow();
 	});
 });

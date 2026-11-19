@@ -3,15 +3,20 @@
 	import PersonIcon from './PersonIcon.svelte';
 
 	// Shown before buying something that spends talents while you have to choose which talent pays for a regular person.
+	// With Work ethic one talent pays all the people of a building.
 	let {
-		building,
+		name,
+		isUnit,
+		isWorkEthic,
 		required,
 		choices,
 		options,
 		onConfirm,
 		onCancel
 	}: {
-		building: string;
+		name: string;
+		isUnit: boolean;
+		isWorkEthic: boolean;
 		required: Talent[]; // spent because the cost asks for them
 		choices: number; // how many regular people a chosen talent pays for
 		options: Talent[]; // the talents to choose from
@@ -29,16 +34,18 @@
 </script>
 
 <dialog {@attach (node) => node.showModal()} oncancel={onCancel}>
-	<h2>Buy a {building}</h2>
+	<h2>Buy a {name}</h2>
 
 	{#if required.length}
-		<p>The {building} needs: {required.join(', ')}.</p>
+		<p>The {name} needs: {required.join(', ')}.</p>
 	{/if}
 
 	{#if choices > 0}
 		<p>
-			You have no regular people left.
-			{#if choices === 1}
+			You don't have enough regular people.
+			{#if isWorkEthic}
+				Work ethic: choose which talented person pays all of its people:
+			{:else if choices === 1}
 				Choose which talented person to use as a regular person:
 			{:else}
 				Choose which {choices} talented people to use as regular people:
@@ -56,7 +63,7 @@
 
 	<div class="buttons">
 		<button class="primary" disabled={chosen.length !== choices} onclick={() => onConfirm(chosen.map((i) => options[i]))}>
-			Build
+			{isUnit ? 'Buy' : 'Build'}
 		</button>
 		<button onclick={onCancel}>Cancel</button>
 	</div>
