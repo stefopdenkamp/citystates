@@ -30,3 +30,6 @@ vite.config.ts.timestamp-*
 # Claude
 CLAUDE.md
 .claude/
+
+# Editor
+.vscode/
