@@ -1,0 +1,33 @@
+# Synology Container Manager > Project > Create, pointing at a folder that holds:
+#   docker-compose.yml   (this file)
+#   data/                (citystates.db, created on first start)
+# Import dist/citystates.tar first (Container Manager > Image > Import).
+# The game is then at http://<nas>:5160/games/citystates
+
+services:
+  citystates:
+    image: citystates:latest
+    pull_policy: never
+    container_name: citystates
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5160
+      DATABASE_URL: file:/data/citystates.db
+    ports:
+      - "5160:5160"
+    volumes:
+      - ./data:/data
+    # root so it can write to a Synology folder without fixing ownership first;
+    # only DAC_OVERRIDE (ignore file permissions) is given back, every other capability stays dropped
+    user: "0:0"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import * as game from './logic';
-import { regularPeopleInPool, type Talent } from './config';
+import { objectives as objectiveList, regularPeopleInPool, type Talent } from './config';
 import type { GameSettings, GameState } from './types';
 
 const settings: GameSettings = {
@@ -137,6 +137,19 @@ describe('a generation', () => {
 		expect(state.stats.nrOfGenerations).toBe(2);
 		expect(state.talentsAdded).toBe(true);
 		expect(state.phase).toBe('born');
+	});
+
+	test('fewer of each talent go into the pool with 4 to 6 players', () => {
+		for (const [playerCount, perType] of [[3, 6], [4, 5], [5, 4], [6, 3]]) {
+			const state = startedGame(playerCount);
+			toActionPhase(state);
+			endAllTurns(state);
+			for (const player of state.players) game.readyForNextGeneration(state, player.id);
+			expect(state.talentsAdded).toBe(true);
+			// in the pool, or drawn this generation
+			const scientists = [...state.peoplePool, ...(state.lastBorn?.drawn ?? [])].filter((p) => p === 'scientist');
+			expect([playerCount, scientists.length]).toEqual([playerCount, perType]);
+		}
 	});
 
 	test('production stops at the highest cap', () => {
@@ -512,7 +525,7 @@ describe('army and spy', () => {
 		expect(game.overviewText(state, b.id, 'gold', 'production')).toBe('Produced +0\n- 1 stall +1\n- 1 missionary -1');
 	});
 
-	test('an inquisitor blocks like a missionary, or removes all missionaries and inquisitors, also your own', () => {
+	test('an inquisitor blocks like a missionary, or removes all other missionaries and inquisitors (also your own) and stays', () => {
 		const { state, order } = threePlayers();
 		const [a, b, c] = order;
 		unlockBasicUnits(state, ['shrine'], a, c);
@@ -532,10 +545,44 @@ describe('army and spy', () => {
 		game.buyUnit(state, c.id, 'inquisitor');
 		expect(() => game.deployUnit(state, c.id, 'missionary', armoury.x, armoury.y)).toThrow(); // an inquisitor is alone
 		game.deployUnit(state, c.id, 'missionary', stall.x, stall.y);
-		game.deployUnit(state, c.id, 'inquisitor', stall.x, stall.y); // removes a's missionary and its own
-		expect(game.faithUnitsAt(state, stall.x, stall.y)).toHaveLength(0);
-		expect(game.resourceProduction(state, b.id, 'gold')).toBe(1);
+		game.deployUnit(state, c.id, 'inquisitor', stall.x, stall.y); // removes a's missionary and its own, and stays
+		expect(game.faithUnitsAt(state, stall.x, stall.y).map((u) => [u.type, u.ownerId])).toEqual([['inquisitor', c.id]]);
+		expect(game.resourceProduction(state, b.id, 'gold')).toBe(0);
+		expect(state.log.at(-1)?.text).toEndWith("'s stall and stays");
 		expect(c.undeployedUnits).toEqual([]);
+	});
+
+	test('an inquisitor can replace your own missionary on an opponent\'s building', () => {
+		const { state, order } = threePlayers();
+		const [a, b] = order;
+		unlockBasicUnits(state, ['shrine'], a);
+		const stall = { x: b.center.x - 1, y: b.center.y };
+		state.buildings.push({ id: 'st', type: 'stall', ownerId: b.id, ...stall });
+		state.units.push({ id: 'm', type: 'missionary', ownerId: a.id, ...stall });
+		a.undeployedUnits = ['inquisitor'];
+		expect(game.unitTargets(state, a.id, 'inquisitor').has(`${stall.x},${stall.y}`)).toBe(true);
+		game.deployUnit(state, a.id, 'inquisitor', stall.x, stall.y);
+		expect(game.faithUnitsAt(state, stall.x, stall.y).map((u) => [u.type, u.ownerId])).toEqual([['inquisitor', a.id]]);
+	});
+
+	test('on your own building an inquisitor removes the others, and only stays with Persecution', () => {
+		const { state, order } = threePlayers();
+		const [a, b] = order;
+		unlockBasicUnits(state, ['shrine'], a, b);
+		const stall = { x: b.center.x - 1, y: b.center.y };
+		const armoury = { x: b.center.x + 1, y: b.center.y };
+		state.buildings.push({ id: 'st', type: 'stall', ownerId: b.id, ...stall }, { id: 'ar', type: 'armoury', ownerId: b.id, ...armoury });
+		state.units.push(
+			{ id: 'm', type: 'missionary', ownerId: a.id, ...stall },
+			{ id: 'i', type: 'inquisitor', ownerId: a.id, ...armoury }
+		);
+		b.undeployedUnits = ['inquisitor', 'inquisitor'];
+		state.turnIndex = order.indexOf(b);
+		game.deployUnit(state, b.id, 'inquisitor', stall.x, stall.y);
+		expect(game.faithUnitsAt(state, stall.x, stall.y)).toHaveLength(0);
+		b.unlockedTechnologies = [...(b.unlockedTechnologies ?? []), 'Persecution'];
+		game.deployUnit(state, b.id, 'inquisitor', armoury.x, armoury.y);
+		expect(game.faithUnitsAt(state, armoury.x, armoury.y).map((u) => [u.type, u.ownerId])).toEqual([['inquisitor', b.id]]);
 	});
 
 	test('a city state produces 1 of its resource, when city states are enabled', () => {
@@ -729,14 +776,14 @@ describe('objectives', () => {
 		expect(game.objectiveProgress(state, player.id, 1)).toBe(11 / 25);
 		expect(game.objectiveProgress(state, player.id, 2)).toBe(2 / 20); // mercenaries do not count
 		expect(game.objectiveOverview(state, 2)).toBe('anna has 2/20 armies');
-		expect(game.objectiveProgress(state, player.id, 4)).toBe(1 / 10); // only the one on the board
+		expect(game.objectiveProgress(state, player.id, 4)).toBe(1 / 9); // only the one on the board
 		expect(game.objectiveProgress(state, player.id, 5)).toBe(2 / 6);
 		// the counter goes above the goal, the progress stays full
 		player.undeployedUnits = Array(25).fill('army');
 		expect(game.objectiveOverview(state, 2)).toBe('anna has 25/20 armies');
 		expect(game.objectiveProgress(state, player.id, 2)).toBe(1);
 		for (let i = 0; i < 11; i++) state.units.push({ id: 'i' + i, type: 'inquisitor', ownerId: player.id, x: i + 1, y: 0 });
-		expect(game.objectiveOverview(state, 4)).toBe('anna has 12/10 inquisitors');
+		expect(game.objectiveOverview(state, 4)).toBe('anna has 12/9 inquisitors');
 		expect(game.objectiveProgress(state, player.id, 4)).toBe(1);
 	});
 
@@ -1305,6 +1352,18 @@ describe('religious dominance', () => {
 		other.state.units.push({ id: 'm7', type: 'missionary', ownerId: other.a.id, ...other.last });
 		other.state.units.push({ id: 'mc', type: 'missionary', ownerId: other.a.id, ...other.b.center });
 		expect(game.checkObjectives(other.state)).toBe(false);
+	});
+
+	test('a draw between religious dominance and the objectives says how each won', () => {
+		const { state, a, b, last } = dominance();
+		game.deployUnit(state, a.id, 'missionary', last.x, last.y);
+		game.deployUnit(state, a.id, 'missionary', b.center.x, b.center.y);
+		// b meets the only objective: Absolute power, Centralization in effect
+		state.objectives = [objectiveList.findIndex((o) => o.name === 'Absolute power')];
+		b.policiesInEffect = ['Centralization', null, null];
+		expect(game.checkObjectives(state)).toBe(true);
+		expect([...(state.winnerIds ?? [])].sort()).toEqual([a.id, b.id].sort());
+		expect(state.log.at(-1)?.text).toMatch(/^A draw: .+ has religious dominance over all players and .+ has completed all objectives$|^A draw: .+ has completed all objectives and .+ has religious dominance over all players$/);
 	});
 });
 

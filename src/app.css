@@ -3,7 +3,7 @@
 	font-family: 'Cinzel Decorative';
 	font-weight: 400;
 	font-style: normal;
-	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Regular.ttf') format('truetype');
+	src: url('/fonts/cinzel-decorative/CinzelDecorative-Regular.ttf') format('truetype');
 	font-display: swap;
 }
 
@@ -11,7 +11,7 @@
 	font-family: 'Cinzel Decorative';
 	font-weight: 700;
 	font-style: normal;
-	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Bold.ttf') format('truetype');
+	src: url('/fonts/cinzel-decorative/CinzelDecorative-Bold.ttf') format('truetype');
 	font-display: swap;
 }
 
@@ -19,7 +19,7 @@
 	font-family: 'Cinzel Decorative';
 	font-weight: 900;
 	font-style: normal;
-	src: url('/games/citystates/fonts/cinzel-decorative/CinzelDecorative-Black.ttf') format('truetype');
+	src: url('/fonts/cinzel-decorative/CinzelDecorative-Black.ttf') format('truetype');
 	font-display: swap;
 }
 
@@ -28,7 +28,7 @@
 	font-family: 'Source Serif 4';
 	font-weight: 200 900;
 	font-style: normal;
-	src: url('/games/citystates/fonts/source-serif-4/SourceSerif4-Variable.ttf') format('truetype');
+	src: url('/fonts/source-serif-4/SourceSerif4-Variable.ttf') format('truetype');
 	font-display: swap;
 }
 
@@ -36,7 +36,7 @@
 	font-family: 'Source Serif 4';
 	font-weight: 200 900;
 	font-style: italic;
-	src: url('/games/citystates/fonts/source-serif-4/SourceSerif4-Italic-Variable.ttf') format('truetype');
+	src: url('/fonts/source-serif-4/SourceSerif4-Italic-Variable.ttf') format('truetype');
 	font-display: swap;
 }
 
@@ -296,11 +296,25 @@ button:disabled {
 	transform: translateY(calc(var(--height) / -2));
 }
 
-/* the tile shown while dragging a building onto the board (made in ActionSelector) */
-.drag-preview {
+/* the copy of a building or unit that follows the pointer while it is dragged (see pointerDrag.ts) */
+.drag-ghost {
 	position: fixed;
-	top: -100px;
-	left: -100px;
+	z-index: 1000;
+
+	transform-origin: 0 0;
+	pointer-events: none;
+}
+
+/* while a building or unit is dragged: a closed hand over a target or where it came from, else the not-allowed
+   pointer */
+html.grabbing,
+html.grabbing * {
+	cursor: grabbing !important;
+}
+
+html.not-allowed,
+html.not-allowed * {
+	cursor: not-allowed !important;
 }
 
 input[type='checkbox'] {

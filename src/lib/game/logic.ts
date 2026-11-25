@@ -98,7 +98,7 @@ export const quotedName = (state: GameState | PublicGameState, player: Omit<Play
 	`'${fullName(state, player)}'`;
 
 // Turn order starting from the first player of this generation.
-const playersFromStart = <T extends { id: string }>(state: { players: T[]; startPlayerIndex: number }) =>
+export const playersFromStart = <T extends { id: string }>(state: { players: T[]; startPlayerIndex: number }) =>
 	state.players.map((_, i) => state.players[(state.startPlayerIndex + i) % state.players.length]);
 
 // ---- caps, costs and placement (also used by the client) ----
@@ -696,6 +696,18 @@ export const removeBot = (state: GameState, playerId: string) => {
 	state.players = state.players.filter((p) => p.id !== playerId);
 };
 
+// Any player of an open game can change a bot's title and city state (not cleared: a bot stays ready).
+export const botEditableCharacteristics: Characteristic[] = ['title', 'cityState'];
+
+export const updateBot = (state: GameState, playerId: string, characteristics: Partial<Record<Characteristic, string>>) => {
+	if (!getPlayer(state, playerId).bot) fail('That is not a bot');
+	for (const [key, value] of Object.entries(characteristics)) {
+		if (!botEditableCharacteristics.includes(key as Characteristic)) fail(`A bot's ${key} cannot be changed`);
+		if (!value) fail(`A bot needs a ${key}`);
+	}
+	updatePlayer(state, playerId, { characteristics });
+};
+
 export const updatePlayer = (
 	state: GameState,
 	playerId: string,
@@ -859,7 +871,7 @@ export const beginGeneration = (state: GameState) => {
 	});
 	if (state.stats.nrOfGenerations > 1 && !state.talentsAdded) {
 		for (const talent of talents) {
-			for (let i = 0; i < talentsInPoolPerType; i++) state.peoplePool.push(talent);
+			for (let i = 0; i < talentsInPoolPerType[state.players.length]; i++) state.peoplePool.push(talent);
 		}
 		state.talentsAdded = true;
 	}
@@ -1056,7 +1068,12 @@ export const unitCost = (state: GameState | PublicGameState, player: EffectHolde
 };
 
 // The picture of a building or unit in static/images/pieces as a CSS url, e.g. "scribe's chamber" -> scribes-chamber.jpg
-export const pieceImage = (name: string) => `url('/games/citystates/images/pieces/${name.replace(/'/g, '').replace(/\s+/g, '-')}.jpg')`;
+// Absolute, from the game page's own URL ({base}/:id), so it works behind a proxy prefix and also in a CSS variable
+// (--image), which would otherwise resolve against the stylesheet.
+export const pieceImage = (name: string) => {
+	const path = `images/pieces/${name.replace(/'/g, '').replace(/\s+/g, '-')}.jpg`;
+	return `url('${typeof document === 'undefined' ? path : new URL(path, document.baseURI).href}')`;
+};
 
 // The name of a unit's picture in static/images/pieces (a mercenary looks like an army).
 export const unitImage = (type: string) => getUnitStats(type).image ?? type;
@@ -1066,10 +1083,10 @@ export const unitImage = (type: string) => getUnitStats(type).image ?? type;
 //   with an opponent's army or spy there, which removes both. Armies and mercenaries count as the same kind.
 // - With Counter intelligence in effect your spy also goes on your own building, and keeps other spies out.
 // - Missionaries stack on an opponent's building, one per player, but never where an inquisitor is.
-// - An inquisitor goes where you have no inquisitor yet. It removes all missionaries and inquisitors there (also
-//   your own, and also on your own building) and itself; otherwise it stays and blocks like a missionary.
-// - With Persecution in effect your inquisitor also goes on your own building, stays there and keeps other
-//   missionaries and inquisitors out.
+// - An inquisitor goes where you have no inquisitor yet. It removes all other missionaries and inquisitors there
+//   (also your own) and stays to block like a missionary. On your own building it removes the opponents' and only
+//   stays with Persecution in effect, which also lets it go there without any and keeps other missionaries and
+//   inquisitors out.
 // - A trader goes on no cell but on an opponent's player board (see traderTargets).
 // - A Dictator's buildings are no target for opponents' missionaries, nor for their spies without Covert operations.
 export const unitTargets = (state: GameState | PublicGameState, playerId: string, type: Unit['type']) => {
@@ -1169,9 +1186,10 @@ export const deployUnit = (state: GameState, playerId: string, type: Unit['type'
 		}
 	} else if (faithUnits.length) {
 		state.units = state.units.filter((u) => !faithUnits.includes(u));
-		addLog(state, `${playerTag(player)}'s inquisitor removes the missionaries and inquisitors from ${playerTag(target)}'s ${building.type}`);
-		// with Persecution in effect it stays to guard your own building
-		if (target === player && hasEffect(player, 'persecution')) state.units.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
+		// it stays, on your own building only with Persecution in effect (to guard it)
+		const stays = target !== player || hasEffect(player, 'persecution');
+		if (stays) state.units.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
+		addLog(state, `${playerTag(player)}'s inquisitor removes the missionaries and inquisitors from ${playerTag(target)}'s ${building.type}${stays ? ' and stays' : ''}`);
 	} else {
 		state.units.push({ id: crypto.randomUUID(), type, ownerId: playerId, x, y });
 		addLog(state, `${playerTag(player)} places a ${type} on ${playerTag(target)}'s ${building.type}`);
@@ -1374,17 +1392,20 @@ const isReligiouslyDominant = (state: GameState, playerId: string) =>
 	state.isReligiousDominanceEnabled && state.players.length > 1 && religiousDominanceCount(state, playerId) === state.players.length - 1;
 
 export const checkObjectives = (state: GameState) => {
-	const winners = state.players.filter(
-		(p) => state.objectives.every((o) => objectiveProgress(state, p.id, o) >= 1) || isReligiouslyDominant(state, p.id)
-	);
+	const hasAllObjectives = (p: Player) => state.objectives.every((o) => objectiveProgress(state, p.id, o) >= 1);
+	const winners = state.players.filter((p) => hasAllObjectives(p) || isReligiouslyDominant(state, p.id));
 	if (!winners.length) return false;
 	state.gameStatus = 'finished';
 	state.winnerIds = winners.map((p) => p.id);
 	state.turnEndsAt = null;
 	for (const player of state.players) player.isTurn = false;
+	// how each winner won; a draw where they won in different ways says it per winner
+	const how = (p: Player) => (isReligiouslyDominant(state, p.id) ? 'religious dominance over all players' : 'completed all objectives');
+	const ways = new Set(winners.map(how));
 	const names = winners.map(playerTag).join(' and ');
-	const how = winners.every((p) => isReligiouslyDominant(state, p.id)) ? 'religious dominance over all players' : 'completed all objectives';
-	addLog(state, winners.length > 1 ? `A draw: ${names} have ${how}` : `${names} has ${how} and wins the game`);
+	if (winners.length === 1) addLog(state, `${names} has ${how(winners[0])} and wins the game`);
+	else if (ways.size === 1) addLog(state, `A draw: ${names} have ${how(winners[0])}`);
+	else addLog(state, `A draw: ${winners.map((p) => `${playerTag(p)} has ${how(p)}`).join(' and ')}`);
 	return true;
 };
 

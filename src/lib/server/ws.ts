@@ -281,6 +281,13 @@ const handlers: {
 		await changed(state);
 	},
 
+	'bot:update': async (_ws, connection, { playerId, characteristics }) => {
+		const state = currentGame(connection);
+		currentPlayer(connection);
+		game.updateBot(state, playerId, characteristics);
+		await changed(state);
+	},
+
 	'player:update': async (_ws, connection, { name, color, characteristics }) => {
 		const state = currentGame(connection);
 		game.updatePlayer(state, currentPlayer(connection), { name, color, characteristics });

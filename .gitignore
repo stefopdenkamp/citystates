@@ -33,3 +33,6 @@ CLAUDE.md
 
 # Editor
 .vscode/
+
+# Docker pipeline output
+/dist

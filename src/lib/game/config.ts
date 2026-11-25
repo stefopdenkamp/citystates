@@ -88,7 +88,7 @@ export const units: UnitStats[] = [
 	{ name: 'spy', resourceType: 'materials', cost: [{ amount: 1, resourceType: 'people' }, { amount: 5, resourceType: 'materials' }], description: 'Place on buildings to lower the cap of their resource by 1' },
 	{ name: 'trader', resourceType: 'gold', cost: [{ amount: 1, resourceType: 'people' }, { amount: 1, resourceType: 'gold' }], description: "Place on an opponent's player board to trade 2 of your resources for 1 of theirs" },
 	{ name: 'missionary', resourceType: 'faith', cost: [{ amount: 1, resourceType: 'people' }, { amount: 2, resourceType: 'faith' }], description: 'Place on buildings to block 1 of their production' },
-	{ name: 'inquisitor', resourceType: 'faith', cost: [{ amount: 1, resourceType: 'people' }, { amount: 5, resourceType: 'faith' }], description: 'Place on buildings to block 1 of their production, or to remove all missionaries and inquisitors on it' }
+	{ name: 'inquisitor', resourceType: 'faith', cost: [{ amount: 1, resourceType: 'people' }, { amount: 5, resourceType: 'faith' }], description: 'Place on buildings to block 1 of their production, removing all other missionaries and inquisitors on it' }
 ];
 
 // the units a technology or policy unlocks; the others are unlocked by a building of their resource
@@ -102,7 +102,7 @@ export const objectives = [
 	{ name: 'Populous', description: 'Have 25 people', goal: 25, unit: 'people' },
 	{ name: 'Standing army', description: 'Have 20 undeployed armies', goal: 20, unit: 'armies' },
 	{ name: 'Trade empire', description: 'Gain 30 resources through trade in 1 generation', goal: 30, unit: 'traded resources' },
-	{ name: 'Holy inquisition', description: 'Have 10 deployed inquisitors', goal: 10, unit: 'inquisitors' },
+	{ name: 'Holy inquisition', description: 'Have 9 deployed inquisitors', goal: 9, unit: 'inquisitors' },
 	{ name: 'Renaissance court', description: 'Have 1 of each talented person', goal: 6, unit: 'different talents' },
 	{ name: 'Scholarly renown', description: 'Research a level 4 technology', goal: 4, unit: 'technology levels' },
 	{ name: 'Absolute power', description: 'Implement the Centralization policy', goal: 1, unit: 'Centralization in effect' }
@@ -182,7 +182,8 @@ export const gridSizeFor = (playerCount: number) => 5 + 4 * playerCount;
 export const wallRing = 1;
 
 export const regularPeopleInPool = 252;
-export const talentsInPoolPerType = 6;
+// how many of each talent are added to the pool after the first generation, by player count: fewer with more players
+export const talentsInPoolPerType: Record<number, number> = { 1: 6, 2: 6, 3: 6, 4: 5, 5: 4, 6: 3 };
 
 export const bornPhaseMs = 0;
 export const maxTurnTimer = 600;
@@ -260,7 +261,7 @@ export const technologies: InvestmentStats[][] = [
 		{ name: 'Interest', description: 'Upcoming generations receive an additional +1 gold, then +2 gold, etc.', cost: [...costs('gold', 7, 14), { amount: 1, resourceType: 'merchant' }], effect: 'interest' }
 	],
 	[
-		{ name: 'Inquisition', description: 'Unlock inquisitors: they block 1 production of a building, or remove all missionaries and inquisitors on it', cost: costs('faith', 1, 2), effect: 'inquisition' },
+		{ name: 'Inquisition', description: 'Unlock inquisitors: they block 1 production of a building, and remove all other missionaries and inquisitors on it', cost: costs('faith', 1, 2), effect: 'inquisition' },
 		{ name: 'Tithes', description: 'The production your missionaries and inquisitors reduce is added to your own production', cost: costs('faith', 2, 4), effect: 'tithes' },
 		{ name: 'Persecution', description: 'Place an inquisitor on your own building to stop others from placing their missionaries and inquisitors on it', cost: costs('faith', 4, 8), effect: 'persecution' },
 		{ name: 'Pilgrimage', description: 'Your inquisitors reduce all production of the building they are on', cost: [...costs('faith', 7, 14), { amount: 1, resourceType: 'messiah' }], effect: 'pilgrimage' }

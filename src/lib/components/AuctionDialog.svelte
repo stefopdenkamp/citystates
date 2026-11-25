@@ -102,9 +102,15 @@
 		<ol class="bids" aria-label="Bids">
 			{#each history as bid, i (i)}
 				{@const bidder = getPlayer(game, bid.playerId)}
+				<!-- "Anna bid" and the bid as discs: the resource, then the culture. A Patron's culture counts double, so
+				     then what it counts is added -->
 				<li>
-					{bid.total}{usesCulture && bid.culture ? ` (${bidLabel(resource, bid.amount, bid.culture)})` : ` ${resource}`} by
-					<span class="leader" data-color={bidder.color}>{fullName(game, bidder)}</span>
+					<span class="leader" data-color={bidder.color}>{fullName(game, bidder)}</span> bid
+					<span class="bid-pool" title={bidLabel(resource, bid.amount, bid.culture)}>
+						{#each { length: bid.amount }, j (j)}<span class="piece disk" data-resource={resource}></span>{/each}
+						{#each { length: bid.culture }, j (j)}<span class="piece disk" data-resource="culture"></span>{/each}
+					</span>
+					{#if bid.total !== bid.amount + bid.culture}<span>counts {bid.total}</span>{/if}
 				</li>
 			{/each}
 		</ol>
@@ -210,13 +216,35 @@
 	}
 
 	.bids li {
-		display: block;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 0.4rem;
 		padding: 0;
 		text-align: center;
 
 		color: var(--color-grayscale-5);
 		background: none;
 		border: none;
+	}
+
+	/* the discs of a bid in a row, like the resources on a player board */
+	.bid-pool {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 0.2rem;
+		max-width: 20rem;
+		padding: 0.3rem;
+
+		border: 1px solid var(--color-grayscale-3);
+		border-radius: var(--border-radius);
+	}
+
+	/* a low disk in 3D (see .piece in app.css), as on the player board */
+	.disk {
+		--width: 1rem;
+		--depth: 0.22rem;
 	}
 
 	.tie {

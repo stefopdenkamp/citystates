@@ -588,7 +588,7 @@ const chiefBid = (state: GameState, bot: Player) => {
 // 7. like Roda
 // Its missionaries and inquisitors go towards religious dominance: on an opponent's city centre when it can, else on a
 // building inside the wall of the opponent it has covered most, where it has none yet (a missionary where it can, else
-// an inquisitor, which removes the missionaries and inquisitors there or stays).
+// an inquisitor, which removes the missionaries and inquisitors there and stays).
 // It keeps the messiah and scientist its next faith building or technology needs, and only bids on those; when it needs
 // none, it bids like Roda.
 

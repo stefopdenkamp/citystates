@@ -1,6 +1,8 @@
+import { resolve } from '$app/paths';
 import type { ClientMessage, ServerMessage } from '../game/types';
 
-const wsPath = '/games/citystates/ws';
+// the base path includes a proxy prefix when there is one (see server.ts)
+const wsPath = resolve('ws');
 
 // Opens the game websocket and reconnects when the connection drops.
 export const connect = (onOpen: () => void, onMessage: (message: ServerMessage) => void) => {

@@ -8,11 +8,13 @@
 		hasPlaceFor,
 		isUnitUnlocked,
 		pieceImage,
+		playersFromStart,
 		unitCost,
 		unitUnlockText,
 		unitImage
 	} from '#lib/game/logic.ts';
 	import type { PublicGameState, PublicPlayer, Unit } from '#lib/game/types.ts';
+	import { startPointerDrag } from '#lib/client/pointerDrag.ts';
 	import PersonIcon from './PersonIcon.svelte';
 
 	let {
@@ -44,30 +46,35 @@
 
 	const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 
-	// While dragging a building, show its tile, as big as the building will be on the board (2×2 cells for a farm,
-	// 3×3 for an estate). The cursor holds it by the top left cell of a farm and the middle cell of an estate, the
-	// cell it is dropped on.
-	const showDragPreview = (event: DragEvent, building: BuildingStats) => {
-		if (!me) return;
-		const cell = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--board-cell-size')) || 3.2) * rem;
-		const pitch = cell + 2; // a cell and the gap after it
-		const size = buildingSize(building.name);
-		const preview = document.createElement('div');
-		preview.className = 'drag-preview tile';
-		preview.dataset.color = me.color;
-		preview.dataset.resource = building.resourceType;
-		preview.style.backgroundImage = pieceImage(building.name);
-		preview.style.width = preview.style.height = `${(size * pitch - 2) * boardScale}px`;
-		document.body.append(preview);
-		const held = (Math.floor((size - 1) / 2) * pitch + cell / 2) * boardScale;
-		event.dataTransfer?.setDragImage(preview, held, held);
-		setTimeout(() => preview.remove());
+	// A building is dragged with the pointer (see startPointerDrag), its tile as big as the building will be on the
+	// board (2×2 cells for a farm, 3×3 for an estate). The cursor holds it by the top left cell of a farm and the middle
+	// cell of an estate, the cell it is dropped on. The action selector is home: letting go there puts it back.
+	const startBuildingDrag = (event: PointerEvent, building: BuildingStats) => {
+		if (!me || !canBuy(building)) return;
+		const color = me.color;
+		startPointerDrag(event, {
+			home: (event.currentTarget as HTMLElement).closest('.actions'),
+			makeGhost: () => {
+				const cell = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--board-cell-size')) || 3.2) * rem;
+				const pitch = cell + 2; // a cell and the gap after it
+				const size = buildingSize(building.name);
+				const element = document.createElement('div');
+				element.className = 'tile';
+				element.dataset.color = color;
+				element.dataset.resource = building.resourceType;
+				element.style.backgroundImage = pieceImage(building.name);
+				element.style.width = element.style.height = `${(size * pitch - 2) * boardScale}px`;
+				const held = (Math.floor((size - 1) / 2) * pitch + cell / 2) * boardScale;
+				return { element, offsetX: held, offsetY: held };
+			},
+			onStart: () => onSelect(building.name, false),
+			// selected by the drag, so this unselects it
+			onCancel: () => onSelect(building.name)
+		});
 	};
 
 	// The buildings (and after them the technologies and policies) and the units go from the top left to the bottom
-	// right and wrap, in the order of their resource; the border of a tile is in its resource color. Size in rem.
-	const tileSize = 5.5;
-	const tileGap = 0.4;
+	// right and wrap, in the order of their resource; the border of a tile is in its resource color. Size in the CSS.
 	const buildingsInOrder = (['people', ...resourceTypes] as const).flatMap((resource) => buildings.filter((b) => b.resourceType === resource));
 	// all units, greyed out until unlocked (see isUnitUnlocked)
 	const unitsInOrder = resourceTypes.flatMap((resource) => units.filter((u) => u.resourceType === resource));
@@ -79,7 +86,7 @@
 		isMyTurn && !!me && isUnitUnlocked(game, me, unit.name) && canPay(game, me, costOfUnit(unit));
 
 	// The building or unit hovered, with its button's position: its tip is fixed above it, so the scrolling bar does not clip it.
-	let hovered = $state<{ building?: BuildingStats; unit?: UnitStats; rect: DOMRect } | null>(null);
+	let hovered = $state<{ building?: BuildingStats; unit?: UnitStats; isTurn?: boolean; rect: DOMRect } | null>(null);
 
 	// Turn timer, counted down on the client from turnEndsAt.
 	let now = $state(Date.now());
@@ -96,7 +103,7 @@
 {#snippet buildingButton(building: BuildingStats)}
 	<!-- its tile, with its production and cap on it (F&E only add to the people cap) -->
 	<button
-		class="tile"
+		class="tile building"
 		class:selected={selectedBuilding === building.name}
 		data-resource={building.resourceType}
 		data-tutorial={tutorialTarget(building.resourceType)}
@@ -104,12 +111,7 @@
 		disabled={!canBuy(building)}
 		onmouseenter={(event) => (hovered = { building, rect: event.currentTarget.getBoundingClientRect() })}
 		onmouseleave={() => (hovered = null)}
-		draggable={canBuy(building)}
-		ondragstart={(event) => {
-			event.dataTransfer?.setData('text/plain', building.name);
-			showDragPreview(event, building);
-			onSelect(building.name, false);
-		}}
+		onpointerdown={(event) => startBuildingDrag(event, building)}
 		onclick={() => onSelect(building.name)}
 	>
 		<!-- the production with a circle in its resource color (like the unit costs), on a new line the cap -->
@@ -171,43 +173,57 @@
 		{#if me && !isUnitUnlocked(game, me, unit.name)}<div class="unmet">Needs {unitUnlockText(unit.name)}</div>{/if}
 		{@render costList(costOfUnit(unit))}
 	</div>
+{:else if hovered?.isTurn}
+	<!-- the turn order of this generation, from its first player down; who already had their turn is greyed out -->
+	<div class="tip" style:left="{hovered.rect.left + hovered.rect.width / 2}px" style:top="{hovered.rect.top}px">
+		<div class="turn-order">
+			<span class="tip-name">Generation {game.stats.nrOfGenerations}</span>
+			{#each playersFromStart(game) as player, i (player.id)}
+				<span class="arrow">↓</span>
+				<span class="turn-player" class:had-turn={i < game.turnsTaken} data-color={player.color}>{fullName(game, player)}</span>
+			{/each}
+		</div>
+	</div>
 {/if}
 
-<!-- the buildings, the units and the turn controls, 65%, 25% and 10% of the width -->
+<!-- the buildings, the units and the turn controls, each in its own container: about 65%, 25% and 10% of the width -->
 <section class="actions">
 	<!-- the buildings, in rows, in the order of their resource -->
-	<div class="buildings" style:--tile-size="{tileSize}rem" style:--tile-gap="{tileGap}rem">
+	<div class="buildings">
 		<div class="flow">
-			<!-- a gray line between the resources -->
+			<!-- each tile in a cell, so the gray line between the resources (on the cell) does not fade with a disabled tile -->
 			{#each buildingsInOrder as building, i (building.name)}
-				{#if i && building.resourceType !== buildingsInOrder[i - 1].resourceType}<span class="divider"></span>{/if}
-				{@render buildingButton(building)}
+				<span class="cell" class:line-before={i && building.resourceType !== buildingsInOrder[i - 1].resourceType}>
+					{@render buildingButton(building)}
+				</span>
 			{/each}
-			<span class="divider"></span>
-			<button
-				class="tile upgrade"
-				data-resource="knowledge"
-				data-tutorial="technologies"
-				style:background-image={pieceImage('technologies')}
-				title="Technologies: discover technologies"
-				aria-label="Technologies"
-				onclick={() => onOpenInvestment('technology')}
-			></button>
-			<button
-				class="tile upgrade"
-				data-resource="power"
-				data-tutorial="policies"
-				style:background-image={pieceImage('policies')}
-				title="Policies: implement policies"
-				aria-label="Policies"
-				onclick={() => onOpenInvestment('policy')}
-			></button>
-			<span class="divider"></span>
+			<span class="cell line-before">
+				<button
+					class="tile upgrade"
+					data-resource="knowledge"
+					data-tutorial="technologies"
+					style:background-image={pieceImage('technologies')}
+					title="Technologies: discover technologies"
+					aria-label="Technologies"
+					onclick={() => onOpenInvestment('technology')}
+				></button>
+			</span>
+			<span class="cell line-after">
+				<button
+					class="tile upgrade"
+					data-resource="power"
+					data-tutorial="policies"
+					style:background-image={pieceImage('policies')}
+					title="Policies: implement policies"
+					aria-label="Policies"
+					onclick={() => onOpenInvestment('policy')}
+				></button>
+			</span>
 		</div>
 	</div>
 
 	<!-- the units as round tiles with their picture and their costs on them, in rows like the buildings -->
-	<div class="buildings units" data-tutorial="units" style:--tile-size="{tileSize}rem" style:--tile-gap="{tileGap}rem">
+	<div class="units" data-tutorial="units">
 		<div class="flow">
 			{#each unitsInOrder as unit (unit.name)}
 				<button
@@ -228,7 +244,14 @@
 
 	<div class="turn" data-tutorial="turn">
 		{#if currentPlayer}
-			<span class="turn-label">{isMyTurn ? 'Your turn' : `${fullName(game, currentPlayer)}'s turn`}</span>
+			<span
+				class="turn-label"
+				role="note"
+				onmouseenter={(event) => (hovered = { isTurn: true, rect: event.currentTarget.getBoundingClientRect() })}
+				onmouseleave={() => (hovered = null)}
+			>
+				{isMyTurn ? 'Your turn' : `${fullName(game, currentPlayer)}'s turn`}
+			</span>
 			{#if secondsLeft !== null}
 				<span class="timer" class:urgent={secondsLeft <= 10}>{timeLabel(secondsLeft)}</span>
 			{/if}
@@ -239,15 +262,30 @@
 </section>
 
 <style>
+	/* the buildings and units share the leftover width, the turn controls never get narrower than their buttons */
 	.actions {
+		--tile-size: 5.5rem;
+		--tile-gap: 0.4rem;
+		--container-padding: 1rem;
+
 		display: grid;
-		grid-template-columns: minmax(0, 6.5fr) minmax(0, 2.5fr) minmax(0, 1fr);
-		gap: 1rem;
+		grid-template-columns: minmax(0, 6.5fr) minmax(0, 2.5fr) minmax(10rem, 1fr);
 		grid-area: actions;
-		padding: 1rem 3rem;
 		overflow-x: auto;
 
 		background-color: var(--color-grayscale-2);
+	}
+
+	/* the three containers; the turn controls keep their 1rem padding on low screens too */
+	.buildings,
+	.units,
+	.turn {
+		min-width: 0;
+		padding: var(--container-padding);
+	}
+
+	.turn {
+		padding: 1rem;
 	}
 
 	/* like the tip of the info icon, its parts split by a line */
@@ -289,42 +327,61 @@
 		text-transform: capitalize;
 	}
 
-	.buildings {
+	/* the turn order: under each other, an arrow between them */
+	.turn-order {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
-		min-width: 0;
+		align-items: center;
+	}
+
+	.turn-player {
+		color: var(--player-color);
+		font-weight: 700;
+	}
+
+	.turn-player.had-turn {
+		opacity: 0.4;
 	}
 
 	/* a gray line on either side of the units, like the line before the technologies */
 	.units {
-		padding: 0 1rem;
-
 		border-right: 1px solid var(--color-grayscale-4);
 		border-left: 1px solid var(--color-grayscale-4);
 	}
 
-	/* the units in columns centered as a whole, so they are as far from both lines; a last row still starts on the left */
-	.units .flow {
+	/* the tiles in columns centered as a whole, so the leftover width is on both sides; a last row still starts on the
+	   left. More room at the bottom for the side of the tiles. */
+	.flow {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, var(--tile-size));
 		justify-content: center;
-	}
-
-	/* more room at the bottom for the side of the tiles */
-	.flow {
-		display: flex;
-		flex-wrap: wrap;
 		gap: calc(var(--tile-gap) + 0.25rem) var(--tile-gap);
 		padding-bottom: 0.25rem;
 	}
 
-	/* a gray line before the technologies and after the policies */
-	.divider {
+	.cell {
+		position: relative;
+	}
+
+	/* a gray line between the resources, before the technologies and after the policies: in the middle of the gap */
+	.cell.line-before::before,
+	.cell.line-after::after {
+		position: absolute;
+		top: 0;
 		width: 1px;
 		height: var(--tile-size);
 
 		background-color: var(--color-grayscale-4);
+
+		content: '';
+	}
+
+	.cell.line-before::before {
+		left: calc(var(--tile-gap) / -2 - 0.5px);
+	}
+
+	.cell.line-after::after {
+		right: calc(var(--tile-gap) / -2 - 0.5px);
 	}
 
 	/* in the action bar the border shows the resource of a tile, on the board the owner's color */
@@ -338,6 +395,12 @@
 		width: var(--tile-size);
 		height: var(--tile-size);
 		padding: 0;
+	}
+
+	/* a building you can buy is dragged with the pointer (see startBuildingDrag), also on touch screens */
+	button.tile.building:not(:disabled) {
+		cursor: grab;
+		touch-action: none;
 	}
 
 	/* the technologies and policies: their name on their resource color */
@@ -406,6 +469,10 @@
 		text-align: center;
 	}
 
+	.turn button {
+		white-space: nowrap;
+	}
+
 	.turn-label {
 		font: var(--font-button);
 		overflow-wrap: break-word;
@@ -417,5 +484,13 @@
 
 	.timer.urgent {
 		color: var(--color-danger);
+	}
+
+	/* smaller tiles on low screens, so the board keeps its room */
+	@media (max-height: 999px) {
+		.actions {
+			--tile-size: 4rem;
+			--container-padding: 0.5rem;
+		}
 	}
 </style>

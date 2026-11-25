@@ -107,7 +107,7 @@
 		left: 0;
 		z-index: -1;
 
-		background: url('/games/citystates/images/lobby-background.jpg') center top / cover no-repeat;
+		background: url('/images/lobby-background.jpg') center top / cover no-repeat;
 	}
 
 	/* fades the top edge of the image into the page background */

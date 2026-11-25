@@ -225,7 +225,8 @@
 	const startPan = (event: PointerEvent) => {
 		if (event.button !== 0) return;
 		hasMoved = false;
-		if ((event.target as HTMLElement).closest('[draggable="true"]')) return;
+		// dragging a unit from your stock moves that, not the board
+		if ((event.target as HTMLElement).closest('[data-drag-unit]')) return;
 		drag = { x: event.clientX, y: event.clientY, startX: offset.x, startY: offset.y };
 	};
 
@@ -260,7 +261,8 @@
 	};
 </script>
 
-<svelte:window onpointermove={pan} onpointerup={() => (drag = null)} />
+<!-- any press resets hasMoved, also one outside the board (dragging a building from the action selector) -->
+<svelte:window onpointerdown={() => (hasMoved = false)} onpointermove={pan} onpointerup={() => (drag = null)} />
 
 <div
 	class="viewport"
@@ -301,14 +303,6 @@
 				tabindex="-1"
 				onclick={() => clickCell(cell)}
 				onpointerenter={() => (hovered = cell)}
-				ondragenter={() => (hovered = cell)}
-				ondragover={(event) => (placeable.has(cell.key) || isTarget(cell.key)) && event.preventDefault()}
-				ondrop={(event) => {
-					event.preventDefault();
-					hovered = null;
-					if (isTarget(cell.key)) onPlace(cell.x, cell.y);
-					else if (placeable.has(cell.key)) placeAt(cell);
-				}}
 			>
 				{#if cell.content?.kind === 'center'}
 					{@const centre = cell.content}
@@ -383,14 +377,6 @@
 				tabindex="-1"
 				onclick={() => clickBuilding(building, key)}
 				onpointerenter={() => (hovered = placeable.has(key) ? shownAt.get(key)! : null)}
-				ondragenter={() => (hovered = placeable.has(key) ? shownAt.get(key)! : null)}
-				ondragover={(event) => (isTarget(key) || placeable.has(key)) && event.preventDefault()}
-				ondrop={(event) => {
-					event.preventDefault();
-					hovered = null;
-					if (isTarget(key)) onPlace(building.x, building.y);
-					else if (placeable.has(key)) placeAt(shownAt.get(key)!);
-				}}
 			>
 				<span
 					class="building tile"
@@ -542,7 +528,7 @@
 		inset: 0;
 		z-index: -1;
 
-		background: url('/games/citystates/images/board-background.jpg') center / cover no-repeat;
+		background: url('/images/board-background.jpg') center / cover no-repeat;
 		border-radius: 5px;
 		/* filter: grayscale(0.25) contrast(0.95) brightness(1.05); */
 		content: '';

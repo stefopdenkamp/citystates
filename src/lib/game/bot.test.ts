@@ -65,6 +65,22 @@ describe('bots', () => {
 		expect(state.players).toHaveLength(1);
 	});
 
+	test("a bot's title and city state can be changed, not cleared, and not its other characteristics", () => {
+		const state = game.createGameState({ ...settings([0, 1]), enabledCharacteristics: { title: true, personalityTrait: false, cityState: true } }, 'g', null);
+		const person = game.addPlayer(state);
+		game.updatePlayer(state, person.id, { characteristics: { cityState: 'Pisa' } });
+		const bot = game.addBot(state, 'Roda');
+		game.updateBot(state, bot.id, { title: 'Bishop', cityState: 'Venice' });
+		expect(bot.characteristics).toMatchObject({ title: 'Bishop', cityState: 'Venice' });
+		expect(bot.isReadyForGame).toBe(true);
+		expect(() => game.updateBot(state, bot.id, { cityState: 'Pisa' })).toThrow('That city state is taken');
+		expect(() => game.updateBot(state, bot.id, { title: '' })).toThrow();
+		expect(() => game.updateBot(state, bot.id, { personalityTrait: 'the Wise' })).toThrow();
+		expect(() => game.updateBot(state, person.id, { title: 'Bishop' })).toThrow('That is not a bot');
+		state.gameStatus = 'inProgress';
+		expect(() => game.updateBot(state, bot.id, { title: 'General' })).toThrow('Players can only be changed before the game starts');
+	});
+
 	test('orange and gray can no longer be chosen', () => {
 		const state = game.createGameState(settings([0, 1]), 'g', null);
 		const person = game.addPlayer(state);
@@ -279,8 +295,9 @@ describe('bots', () => {
 		state.phase = 'action';
 		state.turnIndex = state.players.findIndex((p) => p.id === botId);
 		runBot(state, 0);
-		expect(game.faithUnitsAt(state, own.x, own.y)).toHaveLength(0);
-		expect(game.faithUnitsAt(state, theirs.x, theirs.y)).toHaveLength(0);
+		expect(game.faithUnitsAt(state, own.x, own.y)).toHaveLength(0); // without Persecution it does not stay
+		// on their building it removes theirs and stays
+		expect(game.faithUnitsAt(state, theirs.x, theirs.y).map((u) => u.ownerId)).toEqual([botId]);
 		expect(bot.undeployedUnits).toEqual([]);
 	});
 

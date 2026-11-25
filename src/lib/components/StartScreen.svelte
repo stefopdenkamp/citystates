@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { bots, characteristicInfo, characteristicLabels as labels, characteristicOptions as options, colors } from '#lib/game/config.ts';
-	import { canBeReady, canStart } from '#lib/game/logic.ts';
+	import { botEditableCharacteristics, canBeReady, canStart } from '#lib/game/logic.ts';
 	import type { Characteristic, ClientMessage, PublicGameState } from '#lib/game/types.ts';
 	import InfoIcon from './InfoIcon.svelte';
 
@@ -39,8 +39,11 @@
 	// only players of the game (not spectators) can put bots in or take them out
 	const canChangeBots = $derived(!!playerId && game.players.some((p) => p.id === playerId));
 
-	const updateCharacteristic = (key: Characteristic, value: string) =>
-		send({ type: 'player:update', characteristics: { [key]: value } });
+	// your own characteristics, or a bot's title and city state
+	const updateCharacteristic = (player: { id: string; bot?: string }, key: Characteristic, value: string) =>
+		send(player.bot ? { type: 'bot:update', playerId: player.id, characteristics: { [key]: value } } : { type: 'player:update', characteristics: { [key]: value } });
+	const canChange = (player: { id: string; bot?: string }, key: Characteristic) =>
+		player.bot ? canChangeBots && botEditableCharacteristics.includes(key) : player.id === playerId;
 </script>
 
 <main>
@@ -103,11 +106,12 @@
 					<select
 						class:empty={!player.characteristics[key]}
 						value={player.characteristics[key]}
-						disabled={!isMe}
+						disabled={!canChange(player, key)}
 						aria-label={headers[key]}
-						onchange={(event) => updateCharacteristic(key, event.currentTarget.value)}
+						onchange={(event) => updateCharacteristic(player, key, event.currentTarget.value)}
 					>
-						<option value="">{labels[key]}</option>
+						<!-- a bot always has one -->
+						<option value="" disabled={!!player.bot}>{labels[key]}</option>
 						{#each options[key] as option (option)}
 							<option value={option} disabled={key === 'cityState' && takenCityStates.has(option)}>
 								{key === 'cityState' ? `of ${option}` : option}

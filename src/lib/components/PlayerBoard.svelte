@@ -3,6 +3,7 @@
 	import { canSpend, fullName, getBuildingStats, overviewText, peopleCap, peopleCount, peopleText, pieceImage, resourceCap, resourceOverview, resourceProduction, unitImage } from '#lib/game/logic.ts';
 	import type { PublicGameState, PublicPlayer, Unit } from '#lib/game/types.ts';
 	import { confirmPopup } from '#lib/client/popup.svelte.ts';
+	import { startPointerDrag } from '#lib/client/pointerDrag.ts';
 	import PersonIcon from './PersonIcon.svelte';
 
 	// A player's board next to the game board: their policies in effect, people, resources and unused units.
@@ -66,6 +67,25 @@
 	// (Centralized logistics).
 	const isRaisedByUnits = (resource: ResourceType | 'people') =>
 		resourceOverview(game, player.id, resource).cap.some((line) => ['spy', 'army', 'mercenary'].includes(line.source) && line.amount > 0);
+
+	// A unit in your stock is dragged with the pointer (see startPointerDrag), shown at least as big as unzoomed so the
+	// hand does not hide it; your own board is home, letting go there puts it back.
+	const startUnitDrag = (event: PointerEvent, unit: Unit['type']) => {
+		if (!canUseUnits) return;
+		const button = event.currentTarget as HTMLElement;
+		startPointerDrag(event, {
+			home: button.closest('.player-board'),
+			makeGhost: () => {
+				const scale = Math.max(1, button.getBoundingClientRect().width / button.offsetWidth);
+				const element = button.cloneNode(true) as HTMLElement;
+				element.style.transform = `scale(${scale})`;
+				// held in the middle
+				return { element, offsetX: (button.offsetWidth * scale) / 2, offsetY: (button.offsetHeight * scale) / 2 };
+			},
+			onStart: () => onSelectUnit?.(unit),
+			onCancel: () => onSelectUnit?.(null)
+		});
+	};
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -75,11 +95,6 @@
 	class:target={isTarget}
 	data-color={player.color}
 	onclick={(event) => isTarget && !(event.target as HTMLElement).closest('button') && onTarget?.()}
-	ondragover={(event) => isTarget && event.preventDefault()}
-	ondrop={(event) => {
-		event.preventDefault();
-		if (isTarget) onTarget?.();
-	}}
 >
 	<h2>{fullName(game, player)}</h2>
 
@@ -186,12 +201,8 @@
 							style:--image={pieceImage(unitImage(unit))}
 							title={`${capitalized(unit)}\n${unitStats(unit).description}`}
 							disabled={!canUseUnits}
-							draggable={canUseUnits}
-							ondragstart={(event) => {
-								event.dataTransfer?.setData('text/plain', unit);
-								onSelectUnit(unit);
-							}}
-							ondragend={(event) => event.dataTransfer?.dropEffect === 'none' && onSelectUnit(null)}
+							data-drag-unit
+							onpointerdown={(event) => startUnitDrag(event, unit)}
 							onclick={() => onSelectUnit(selectedUnit === unit ? null : unit)}
 							aria-label={unit}
 						></button>
@@ -405,8 +416,10 @@
 		filter: drop-shadow(0 0 1px var(--color-accent)) drop-shadow(0 0 2px var(--color-accent));
 	}
 
+	/* dragged with the pointer (see startUnitDrag), also on touch screens */
 	button.unit {
 		cursor: grab;
+		touch-action: none;
 	}
 
 	.none {

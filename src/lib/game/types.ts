@@ -145,6 +145,7 @@ export type ClientMessage =
 	| { type: 'game:start' }
 	| { type: 'bot:add'; bot: string }
 	| { type: 'bot:remove'; playerId: string }
+	| { type: 'bot:update'; playerId: string; characteristics: Partial<Record<Characteristic, string>> }
 	| { type: 'auction:bid'; amount: number; culture: number }
 	| { type: 'auction:done' }
 	| { type: 'build'; building: string; x: number; y: number; talents?: Talent[] }
